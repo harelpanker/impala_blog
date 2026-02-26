@@ -5,5 +5,8 @@ import mdx from '@astrojs/mdx';
 
 // https://astro.build/config
 export default defineConfig({
-  integrations: [mdx()]
+	// Update these for GitHub Pages:
+	site: 'https://harelpanker.github.io',
+	base: '/impala_blog',
+	integrations: [mdx()],
 });
