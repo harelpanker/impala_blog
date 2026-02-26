@@ -1,0 +1,45 @@
+---
+import { getCollection, render, type CollectionEntry } from 'astro:content';
+import BlogPost from '../../layouts/BlogPost.astro';
+import SeriesNav from '../../components/SeriesNav.astro';
+
+export async function getStaticPaths() {
+  const posts = await getCollection('blog', ({ data }) => !data.draft);
+
+  return posts.map((post) => ({
+    params: { slug: post.slug },
+    props: { post },
+  }));
+}
+
+interface Props {
+  post: CollectionEntry<'blog'>;
+}
+
+const { post } = Astro.props;
+const { Content } = await render(post);
+const showSeriesNav = !!post.data.seriesId && !post.data.reference;
+---
+
+<BlogPost
+  title={post.data.title}
+  description={post.data.description}
+  author={post.data.author}
+  date={post.data.pubDate.toISOString().slice(0, 10)}
+>
+  {showSeriesNav && (
+    <SeriesNav
+      seriesId={post.data.seriesId!}
+      currentSlug={post.slug}
+      position="top"
+    />
+  )}
+  <Content />
+  {showSeriesNav && (
+    <SeriesNav
+      seriesId={post.data.seriesId!}
+      currentSlug={post.slug}
+      position="bottom"
+    />
+  )}
+</BlogPost>

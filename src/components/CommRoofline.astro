@@ -1,0 +1,309 @@
+---
+---
+
+<figure class="viz-widget l-body-outset">
+  <div class="viz-widget-header">
+    <h3 class="viz-widget-title">Communication Roofline</h3>
+  </div>
+  <div class="viz-widget-body">
+    <div class="viz-card">
+      <div class="viz-card-body">
+        <div class="viz-canvas-wrap" id="rooflineWrap">
+          <svg id="commRoofline" class="viz-canvas" aria-label="Communication Roofline Chart" role="img"></svg>
+        </div>
+        <div class="viz-legend">
+          <span class="viz-legend-item"><span class="viz-legend-swatch" style="background: var(--comm);"></span> Inter-node (RDMA / RoCE)</span>
+          <span class="viz-legend-item"><span class="viz-legend-swatch" style="background: var(--dbo);"></span> Intra-node (NVLink / xGMI)</span>
+        </div>
+        <p class="viz-card-caption">
+          Small messages are <b>latency-bound</b> (rising slope). Large messages are <b>bandwidth-bound</b> (flat plateau).
+          Wide-EP slices tokens across more peers, shrinking per-peer messages. Without huge batches, inter-node
+          communication lands in the latency-bound regime where most link bandwidth goes unused.
+        </p>
+        <p class="viz-card-caption" style="margin-top: 0.5em; color: var(--muted-2); font-size: 0.78rem;">
+          <b>Model:</b> Hockney latency-bandwidth &mdash;
+          <span style="white-space: nowrap;">t = L + V/BW,</span>
+          <span style="white-space: nowrap;">BW<sub>eff</sub> = V/t.</span>
+          Inter-node: L&thinsp;=&thinsp;20&thinsp;&micro;s, BW&thinsp;=&thinsp;25&thinsp;GB/s (400&thinsp;Gbps IB/RoCE, ~50% utilization typical of fragmented all-to-allv).
+          Intra-node: L&thinsp;=&thinsp;1&thinsp;&micro;s, BW&thinsp;=&thinsp;400&thinsp;GB/s (NVLink 4th-gen / xGMI aggregate).
+          Representative of 8&times;H100 or 8&times;MI300X nodes with 400G NICs; actual curves shift with your topology.
+        </p>
+      </div>
+    </div>
+  </div>
+</figure>
+
+<script>
+  // @ts-nocheck
+  let _roofRaf = 0;
+
+  function scheduleRoofline() {
+    if (_roofRaf) cancelAnimationFrame(_roofRaf);
+    _roofRaf = requestAnimationFrame(() => { _roofRaf = 0; drawCommRoofline(); });
+  }
+
+  function drawCommRoofline() {
+    const d3 = window.d3;
+    if (!d3) { scheduleRoofline(); return; }
+
+    const svgEl = document.getElementById('commRoofline');
+    if (!svgEl) return;
+    const wrap = svgEl.closest('.viz-canvas-wrap');
+    const rect = (wrap ?? svgEl).getBoundingClientRect();
+    const W = Math.max(320, Math.floor(rect.width));
+    const H = Math.max(380, Math.floor(rect.height));
+    if (!Number.isFinite(W) || !Number.isFinite(H)) return;
+
+    const svg = d3.select(svgEl).attr('width', W).attr('height', H).attr('viewBox', `0 0 ${W} ${H}`);
+    svg.selectAll('*').remove();
+
+    // ── Impala theme ──
+    const css = getComputedStyle(document.documentElement);
+    const v = (k, fb) => css.getPropertyValue(k).trim() || fb;
+    const C = {
+      comm:   v('--comm',          '#227bfb'),   // impala-blue
+      intra:  v('--dbo',           '#6a5bf4'),   // purple
+      fg:     v('--fg',            '#101828'),    // impala-ink
+      muted:  v('--muted',         'rgba(16,24,40,0.72)'),
+      muted2: v('--muted-2',       'rgba(16,24,40,0.52)'),
+      brown:  v('--impala-brown-deep', '#460f12'),
+      border: v('--border',        'rgba(78,24,26,0.1)'),
+      cream:  v('--impala-cream',  '#fffcf6'),
+      cream2: v('--impala-cream-2','#fff8ef'),
+      sand:   v('--impala-sand',   '#fff2db'),
+      peach:  v('--impala-peach',  '#ffdcaf'),
+      danger: v('--combine',       '#d04e43'),   // impala red
+      safe:   v('--compute',       '#143c1e'),   // impala-green
+    };
+    const MONO = v('--font-mono', '"JetBrains Mono", monospace');
+    const BODY = v('--font-body', '"DM Sans", sans-serif');
+
+    // ── layout ──
+    const compact = W < 560;
+    const M = { top: 16, right: compact ? 14 : 24, bottom: 44, left: compact ? 48 : 56 };
+    const cW = W - M.left - M.right;
+    const cH = H - M.top - M.bottom;
+
+    // ── scales ──
+    const xMin = 64, xMax = 64 * 1024 * 1024;
+    const x = d3.scaleLog().base(2).domain([xMin, xMax]).range([0, cW]);
+    const yMin = 0.01, yMax = 1000;
+    const y = d3.scaleLog().domain([yMin, yMax]).range([cH, 0]);
+
+    const g = svg.append('g').attr('transform', `translate(${M.left},${M.top})`);
+
+    // clip
+    const clipId = 'roofClip';
+    g.append('defs').append('clipPath').attr('id', clipId)
+      .append('rect').attr('width', cW).attr('height', cH);
+
+    // chart area background (warm cream)
+    g.append('rect').attr('width', cW).attr('height', cH)
+      .attr('fill', C.cream2).attr('rx', 6);
+
+    // ── models ──
+    const interBW = 25, interLat = 20;   // GB/s, µs
+    const intraBW = 400, intraLat = 1;
+    const effBW = (sz, bw, lat) => {
+      const t = lat * 1e-6 + sz / (bw * 1e9);
+      return (sz / t) / 1e9;
+    };
+
+    // ── grid ──
+    const xTicks = [];
+    for (let v = xMin; v <= xMax; v *= 4) xTicks.push(v);
+
+    const gridColor = C.border;
+    g.append('g').attr('transform', `translate(0,${cH})`)
+      .call(d3.axisBottom(x).tickValues(xTicks).tickSize(-cH).tickFormat(''))
+      .call(g => g.select('.domain').remove())
+      .call(g => g.selectAll('line').attr('stroke', gridColor).attr('opacity', 0.6));
+
+    g.append('g')
+      .call(d3.axisLeft(y).ticks(6).tickSize(-cW).tickFormat(''))
+      .call(g => g.select('.domain').remove())
+      .call(g => g.selectAll('line').attr('stroke', gridColor).attr('opacity', 0.6));
+
+    // ── axes ──
+    const fmtSize = d => {
+      if (d >= 1024*1024) return `${Math.round(d/1024/1024)}MB`;
+      if (d >= 1024) return `${Math.round(d/1024)}KB`;
+      return `${d}B`;
+    };
+    const tickFontSize = compact ? '10px' : '11px';
+
+    g.append('g').attr('transform', `translate(0,${cH})`)
+      .call(d3.axisBottom(x).tickValues(xTicks).tickFormat(fmtSize).tickSizeOuter(0))
+      .call(g => g.select('.domain').attr('stroke', C.border))
+      .call(g => g.selectAll('.tick line').attr('stroke', C.border))
+      .call(g => g.selectAll('text').attr('fill', C.muted2).attr('font-family', MONO).attr('font-size', tickFontSize));
+
+    g.append('g')
+      .call(d3.axisLeft(y).ticks(6, '~s').tickSizeOuter(0))
+      .call(g => g.select('.domain').attr('stroke', C.border))
+      .call(g => g.selectAll('.tick line').attr('stroke', C.border))
+      .call(g => g.selectAll('text').attr('fill', C.muted2).attr('font-family', MONO).attr('font-size', tickFontSize));
+
+    // axis labels
+    const labelSize = compact ? '11px' : '12px';
+    g.append('text').attr('x', cW / 2).attr('y', cH + 36)
+      .attr('text-anchor', 'middle').attr('fill', C.muted)
+      .attr('font-family', BODY).attr('font-size', labelSize)
+      .text('Message Size');
+    g.append('text').attr('transform', 'rotate(-90)').attr('y', compact ? -36 : -42).attr('x', -cH / 2)
+      .attr('text-anchor', 'middle').attr('fill', C.muted)
+      .attr('font-family', BODY).attr('font-size', labelSize)
+      .text('Effective Bandwidth (GB/s)');
+
+    // ── asymptote lines (peak bandwidth) ──
+    const drawAsymptote = (bwVal, color, label) => {
+      const yy = y(bwVal);
+      if (yy < 0 || yy > cH) return;
+      g.append('line').attr('x1', 0).attr('x2', cW).attr('y1', yy).attr('y2', yy)
+        .attr('stroke', color).attr('stroke-width', 1).attr('stroke-dasharray', '6 4').attr('opacity', 0.4);
+      g.append('text').attr('x', cW - 4).attr('y', yy - 6)
+        .attr('text-anchor', 'end').attr('fill', color)
+        .attr('font-family', MONO).attr('font-size', compact ? '9px' : '10px')
+        .attr('font-weight', '500').attr('opacity', 0.7)
+        .text(label);
+    };
+    drawAsymptote(intraBW, C.intra, `${intraBW} GB/s (intra-node peak)`);
+    drawAsymptote(interBW, C.comm, `${interBW} GB/s (inter-node peak)`);
+
+    // ── curves ──
+    const N = 200;
+    const logMin = Math.log2(xMin), logMax = Math.log2(xMax);
+    const makeCurveData = (bw, lat) => {
+      const pts = [];
+      for (let i = 0; i <= N; i++) {
+        const sz = Math.pow(2, logMin + (i / N) * (logMax - logMin));
+        pts.push({ sz, bw: effBW(sz, bw, lat) });
+      }
+      return pts;
+    };
+
+    const lineGen = d3.line().x(d => x(d.sz)).y(d => y(d.bw)).curve(d3.curveMonotoneX);
+
+    // intra-node (draw first, behind)
+    g.append('path').datum(makeCurveData(intraBW, intraLat))
+      .attr('fill', 'none').attr('stroke', C.intra).attr('stroke-width', 2.5)
+      .attr('clip-path', `url(#${clipId})`).attr('d', lineGen);
+
+    // inter-node (on top)
+    g.append('path').datum(makeCurveData(interBW, interLat))
+      .attr('fill', 'none').attr('stroke', C.comm).attr('stroke-width', 2.5)
+      .attr('clip-path', `url(#${clipId})`).attr('d', lineGen);
+
+    // ── annotation markers ──
+    const annotSize = compact ? '10px' : '11px';
+
+    // Marker helper: dot + label with subtle background
+    const addMarker = (sz, bw, lat, color, label, side) => {
+      const cx = x(sz), cy = y(effBW(sz, bw, lat));
+      // outer ring
+      g.append('circle').attr('cx', cx).attr('cy', cy).attr('r', 6)
+        .attr('fill', 'none').attr('stroke', color).attr('stroke-width', 1.5).attr('opacity', 0.5);
+      // inner dot
+      g.append('circle').attr('cx', cx).attr('cy', cy).attr('r', 3)
+        .attr('fill', color);
+
+      const isLeft = side === 'left';
+      const tx = isLeft ? cx - 12 : cx + 12;
+      const anchor = isLeft ? 'end' : 'start';
+
+      const txt = g.append('text').attr('x', tx).attr('y', cy + 4)
+        .attr('text-anchor', anchor).attr('fill', color)
+        .attr('font-family', MONO).attr('font-size', annotSize).attr('font-weight', '600')
+        .text(label);
+      try {
+        const bb = txt.node().getBBox();
+        g.insert('rect', () => txt.node())
+          .attr('x', bb.x - 5).attr('y', bb.y - 2)
+          .attr('width', bb.width + 10).attr('height', bb.height + 4)
+          .attr('fill', C.cream2).attr('stroke', C.border).attr('stroke-width', 0.5).attr('rx', 4);
+      } catch (e) {}
+    };
+
+    // "Small batch" danger point on inter-node curve
+    addMarker(4096, interBW, interLat, C.danger, compact ? 'Small B/P' : 'Small B/P  ~4KB', 'right');
+
+    // "Huge batch" efficient point on inter-node curve
+    addMarker(4 * 1024 * 1024, interBW, interLat, C.safe, compact ? 'Huge B/P' : 'Huge B/P  ~4MB', 'left');
+
+    // ── gap annotation (vertical span between curves at 4KB) ──
+    const gapX = x(4096);
+    const gapTop = y(effBW(4096, intraBW, intraLat));
+    const gapBot = y(effBW(4096, interBW, interLat));
+
+    // bracket line
+    g.append('line')
+      .attr('x1', gapX).attr('x2', gapX).attr('y1', gapTop + 8).attr('y2', gapBot - 8)
+      .attr('stroke', C.muted2).attr('stroke-width', 1).attr('stroke-dasharray', '3 3');
+
+    // bracket label (rotated, along the line)
+    if (!compact) {
+      const midY = (gapTop + gapBot) / 2;
+      const gapLabel = g.append('text')
+        .attr('x', gapX + 10).attr('y', midY)
+        .attr('fill', C.muted2).attr('font-family', BODY).attr('font-size', '10px')
+        .attr('dominant-baseline', 'middle')
+        .text('inter-node penalty');
+      try {
+        const bb = gapLabel.node().getBBox();
+        g.insert('rect', () => gapLabel.node())
+          .attr('x', bb.x - 3).attr('y', bb.y - 1)
+          .attr('width', bb.width + 6).attr('height', bb.height + 2)
+          .attr('fill', C.cream2).attr('rx', 3);
+      } catch (e) {}
+    }
+  }
+
+  // ── init ──
+  scheduleRoofline();
+  requestAnimationFrame(() => requestAnimationFrame(scheduleRoofline));
+  window.addEventListener('load', scheduleRoofline, { once: true });
+  window.addEventListener('resize', scheduleRoofline);
+  const _rWrap = document.getElementById('rooflineWrap');
+  if (_rWrap && 'ResizeObserver' in window) {
+    new ResizeObserver(scheduleRoofline).observe(_rWrap);
+  }
+</script>
+
+<style>
+  .viz-canvas-wrap {
+    width: 100%;
+    height: 420px;
+    margin-bottom: 0.75rem;
+  }
+
+  #commRoofline.viz-canvas {
+    border: none;
+    background: transparent;
+  }
+
+  .viz-legend {
+    display: flex;
+    gap: 1.25rem;
+    justify-content: center;
+    margin-bottom: 0.5rem;
+    font-size: 0.8rem;
+  }
+  .viz-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .viz-legend-swatch {
+    width: 14px;
+    height: 3px;
+    border-radius: 2px;
+  }
+  .viz-card-caption {
+    font-size: 0.85rem;
+    color: var(--muted);
+    text-align: left;
+    line-height: 1.55;
+    margin: 0;
+    max-width: none;
+  }
+</style>

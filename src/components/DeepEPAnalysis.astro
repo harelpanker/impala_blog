@@ -1,0 +1,485 @@
+---
+const mathThroughput = String.raw`<k-math>R = B / t_{\text{step}}</k-math>`;
+
+const mathLatency = String.raw`<k-math>t_{\text{step}} \approx \max(t_{\text{compute}},\ t_{\text{comm}})</k-math>`;
+---
+
+<figure id="deepep-analysis" class="viz-widget">
+  <div class="viz-widget-header">
+    <h3 class="viz-widget-title">DeepEP: Performance Analysis</h3>
+    <span class="viz-kpi" id="deepepKpi">—</span>
+  </div>
+  <div class="viz-widget-body">
+    <div class="viz-controls">
+      <div class="viz-ctrl">
+        <div class="viz-ctrl-header">
+          <span class="viz-ctrl-label">Batch tokens</span>
+          <span class="viz-ctrl-value" id="tokensVal-deepep">—</span>
+        </div>
+        <input id="tokens-deepep" type="range" min="0" max="20" step="1" />
+      </div>
+
+      <div class="viz-ctrl">
+        <div class="viz-ctrl-header">
+          <span class="viz-ctrl-label">EP ranks</span>
+          <span class="viz-ctrl-value" id="epVal-deepep">—</span>
+        </div>
+        <input id="ep-deepep" type="range" min="2" max="64" step="2" />
+      </div>
+
+      <div class="viz-ctrl">
+        <div class="viz-ctrl-header">
+          <span class="viz-ctrl-label">Latency</span>
+          <span class="viz-ctrl-value" id="latVal-deepep">—</span>
+        </div>
+        <input id="lat-deepep" type="range" min="2" max="80" step="1" />
+      </div>
+
+      <div class="viz-ctrl">
+        <div class="viz-ctrl-header">
+          <span class="viz-ctrl-label">Bandwidth</span>
+          <span class="viz-ctrl-value" id="bwVal-deepep">—</span>
+        </div>
+        <input id="bw-deepep" type="range" min="5" max="120" step="1" />
+      </div>
+
+      <div class="viz-ctrl">
+        <div class="viz-ctrl-header">
+          <span class="viz-ctrl-label">Compute/tok</span>
+          <span class="viz-ctrl-value" id="ctokVal-deepep">—</span>
+        </div>
+        <input id="ctok-deepep" type="range" min="0.05" max="2.0" step="0.01" />
+      </div>
+
+      <div class="viz-ctrl">
+        <div class="viz-ctrl-header">
+          <span class="viz-ctrl-label">Expert skew</span>
+          <span class="viz-ctrl-value" id="skewVal-deepep">—</span>
+        </div>
+        <input id="skew-deepep" type="range" min="0" max="1" step="0.01" />
+      </div>
+    </div>
+
+    <div class="viz-toolbar">
+      <div class="viz-controls-primary">
+        <div class="viz-group">
+          <div class="viz-segmented-control">
+            <label class="viz-segment">
+              <input type="radio" name="deepepMode" id="deepepLL" checked />
+              <span>Low‑latency</span>
+            </label>
+            <label class="viz-segment">
+              <input type="radio" name="deepepMode" id="deepepHT" />
+              <span>High‑throughput</span>
+            </label>
+          </div>
+        </div>
+        <div class="viz-status-bar">
+          <div class="viz-status-content" id="deepepPill">—</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="viz-split-row">
+      <div class="viz-card viz-card-plot">
+        <div class="viz-card-header">
+          <h4 class="viz-card-title">Comm Time: LL vs HT</h4>
+          <span class="viz-kpi" id="deepepCurveKpi">—</span>
+        </div>
+        <div class="viz-card-body">
+          <div class="viz-canvas-wrap">
+            <svg id="deepepCurve" class="viz-canvas" aria-label="Low-latency vs high-throughput comm curve" role="img"></svg>
+          </div>
+          <div class="viz-legend" aria-label="DeepEP curves legend">
+            <span class="viz-legend-item"><span class="viz-legend-swatch" style="background: var(--dbo);"></span> Low‑latency</span>
+            <span class="viz-legend-item"><span class="viz-legend-swatch" style="background: var(--comm);"></span> High‑throughput</span>
+          </div>
+          <p class="viz-card-caption">LL wins for small batches (lower L), HT wins for large (higher BW_eff).</p>
+        </div>
+      </div>
+
+      <div class="viz-card viz-card-table">
+        <div class="viz-card-header">
+        <h4 class="viz-card-title">Throughput & Latency Analysis</h4>
+      </div>
+      <div class="viz-card-body">
+        <div class="viz-table-container">
+          <div class="viz-comparison-grid">
+            <div class="viz-col-header">Metric</div>
+            <div class="viz-col-header text-dbo">LL <span class="viz-sub">w/ DBO</span></div>
+            <div class="viz-col-header text-dbo">LL <span class="viz-sub">w/o DBO</span></div>
+            <div class="viz-col-header text-comm">HT <span class="viz-sub">w/ DBO</span></div>
+            <div class="viz-col-header text-comm">HT <span class="viz-sub">w/o DBO</span></div>
+
+            <div class="viz-row-label">Comm Time</div>
+            <div id="metric-ll-comm" class="viz-val-cell">—</div>
+            <div id="metric-ll-comm-nodbo" class="viz-val-cell">—</div>
+            <div id="metric-ht-comm" class="viz-val-cell">—</div>
+            <div id="metric-ht-comm-nodbo" class="viz-val-cell">—</div>
+
+            <div class="viz-row-label">Step Latency</div>
+            <div id="metric-ll-lat" class="viz-val-cell">—</div>
+            <div id="metric-ll-lat-nodbo" class="viz-val-cell">—</div>
+            <div id="metric-ht-lat" class="viz-val-cell">—</div>
+            <div id="metric-ht-lat-nodbo" class="viz-val-cell">—</div>
+
+            <div class="viz-row-label">Throughput</div>
+            <div id="metric-ll-tps" class="viz-val-cell">—</div>
+            <div id="metric-ll-tps-nodbo" class="viz-val-cell">—</div>
+            <div id="metric-ht-tps" class="viz-val-cell">—</div>
+            <div id="metric-ht-tps-nodbo" class="viz-val-cell">—</div>
+          </div>
+        </div>
+        <div class="viz-card-caption" style="margin-top: 16px;">
+          <p style="margin-bottom: 4px;">
+            <b>Throughput:</b> <span class="math-comm" set:html={mathThroughput}></span> (tokens/sec)
+          </p>
+          <p>
+            <b>Latency:</b> <span class="math-dbo" set:html={mathLatency}></span> (with DBO)
+          </p>
+        </div>
+      </div>
+    </div>
+    </div>
+
+  </div>
+  <figcaption>
+    DeepEP dispatch/compose kernel intuition: <b>low‑latency</b> reduces fixed overhead, while <b>high‑throughput</b> improves effective bandwidth via topology‑aware forwarding.
+  </figcaption>
+</figure>
+
+<style>
+  #deepep-analysis .viz-widget-header {
+    border-bottom: none;
+    padding-bottom: 10px;
+    margin-bottom: 2px;
+  }
+
+  #deepep-analysis .viz-widget-title {
+    letter-spacing: 0.12em;
+  }
+
+  #deepep-analysis #deepepKpi {
+    margin-left: auto;
+    max-width: min(58ch, 62%);
+    text-align: right;
+    font-size: 0.72rem;
+    line-height: 1.35;
+    color: var(--muted);
+  }
+
+  #deepep-analysis .viz-widget-body {
+    padding-top: 12px;
+  }
+
+  #deepep-analysis .viz-controls {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px 12px;
+    margin-bottom: 12px;
+  }
+
+  #deepep-analysis .viz-ctrl {
+    padding: 10px 11px 9px;
+    border: none;
+    border-radius: 10px;
+    background: linear-gradient(180deg, rgba(255, 252, 246, 0.9), rgba(255, 248, 239, 0.72));
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 62px;
+  }
+
+  #deepep-analysis .viz-ctrl-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 5px;
+  }
+
+  #deepep-analysis .viz-ctrl-label {
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: var(--fg);
+    white-space: nowrap;
+  }
+
+  #deepep-analysis .viz-ctrl-value {
+    font-family: var(--font-mono);
+    font-size: 0.69rem;
+    color: var(--muted-2);
+    white-space: nowrap;
+  }
+
+  #deepep-analysis .viz-ctrl input[type="range"] {
+    display: block;
+    width: 100%;
+    margin: 4px 0 0;
+    accent-color: var(--accent);
+    height: 4px;
+  }
+
+  #deepep-analysis .viz-toolbar {
+    margin-bottom: 14px;
+    padding: 10px 11px;
+    border: none;
+    border-radius: 10px;
+    background: rgba(255, 252, 246, 0.78);
+  }
+
+  #deepep-analysis .viz-controls-primary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px 12px;
+    flex-wrap: wrap;
+  }
+
+  #deepep-analysis .viz-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  #deepep-analysis .viz-segmented-control {
+    display: flex;
+    padding: 3px;
+    border-radius: 8px;
+    background: rgba(255, 248, 239, 0.85);
+    gap: 2px;
+  }
+
+  #deepep-analysis .viz-segment {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 5px 12px;
+    font-family: var(--font-body);
+    font-size: 0.74rem;
+    font-weight: 500;
+    color: var(--muted);
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.15s ease;
+    user-select: none;
+  }
+
+  #deepep-analysis .viz-segment:hover {
+    color: var(--fg);
+    background: rgba(255, 252, 246, 0.75);
+  }
+
+  #deepep-analysis .viz-segment:has(input:checked) {
+    background: var(--surface);
+    color: var(--fg);
+    font-weight: 600;
+  }
+
+  #deepep-analysis .viz-segment input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  #deepep-analysis .viz-status-bar {
+    border: none;
+    border-radius: 8px;
+    background: rgba(255, 252, 246, 0.95);
+    padding: 6px 10px;
+    min-height: 34px;
+  }
+
+  #deepep-analysis .viz-status-content {
+    font-size: 0.72rem;
+    letter-spacing: 0.01em;
+    color: var(--muted);
+  }
+
+  #deepep-analysis .viz-split-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin-bottom: 14px;
+    align-items: stretch;
+  }
+
+  #deepep-analysis .viz-split-row > .viz-card {
+    min-width: 0;
+  }
+
+  #deepep-analysis .viz-card {
+    border: none;
+    border-radius: 12px;
+    background: rgba(255, 252, 246, 0.72);
+    overflow: hidden;
+  }
+
+  #deepep-analysis .viz-card-header {
+    padding: 10px 12px;
+    border-bottom: none;
+    background: linear-gradient(180deg, rgba(255, 248, 239, 0.82), rgba(255, 252, 246, 0.6));
+  }
+
+  #deepep-analysis .viz-card-title {
+    color: var(--muted);
+    letter-spacing: 0.09em;
+    font-size: 0.66rem;
+  }
+
+  #deepep-analysis .viz-card-body {
+    padding: 11px 12px 12px;
+  }
+
+  #deepep-analysis .viz-canvas-wrap {
+    margin-bottom: 9px;
+    border: none;
+    border-radius: 10px;
+    background: rgba(255, 248, 239, 0.5);
+    min-height: 220px;
+    height: 220px;
+  }
+
+  #deepep-analysis #deepepCurve.viz-canvas {
+    background: transparent;
+    border-radius: 10px;
+  }
+
+  #deepep-analysis .viz-legend {
+    margin-top: 8px;
+    gap: 12px;
+  }
+
+  #deepep-analysis .viz-legend-item {
+    font-size: 0.73rem;
+    line-height: 1.25;
+    color: var(--muted);
+  }
+
+  #deepep-analysis .viz-card-caption {
+    font-size: 0.79rem;
+    line-height: 1.58;
+    color: var(--muted);
+  }
+
+  /* Table */
+  #deepep-analysis .viz-table-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 0;
+    padding: 4px 0 2px;
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+  }
+
+  #deepep-analysis .viz-comparison-grid {
+    display: grid;
+    grid-template-columns: minmax(88px, 1fr) repeat(4, minmax(66px, 1fr));
+    gap: 5px 10px;
+    font-size: 0.75rem;
+    min-width: 370px;
+    width: 100%;
+  }
+
+  #deepep-analysis .viz-col-header {
+    font-weight: 600;
+    color: var(--muted);
+    font-size: 0.75rem;
+    padding-bottom: 5px;
+  }
+
+  #deepep-analysis .viz-col-header.text-dbo { color: var(--dbo); }
+  #deepep-analysis .viz-col-header.text-comm { color: var(--comm); }
+
+  #deepep-analysis .viz-sub {
+    display: block;
+    font-size: 0.64rem;
+    font-weight: 400;
+    opacity: 0.8;
+    margin-top: 2px;
+  }
+
+  #deepep-analysis .viz-row-label {
+    color: var(--muted);
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    min-height: 28px;
+  }
+
+  #deepep-analysis .viz-val-cell {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    color: var(--fg);
+    display: flex;
+    align-items: center;
+    min-height: 28px;
+    white-space: nowrap;
+  }
+
+  #deepep-analysis figcaption {
+    margin-top: 10px;
+    font-size: 0.92rem;
+    line-height: 1.62;
+    color: var(--muted);
+    max-width: none;
+    width: 100%;
+  }
+
+  @media (max-width: 1100px) {
+    #deepep-analysis .viz-controls {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    #deepep-analysis #deepepKpi {
+      max-width: 100%;
+      width: 100%;
+      text-align: left;
+      margin-top: 3px;
+    }
+
+    #deepep-analysis .viz-split-row {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 760px) {
+    #deepep-analysis .viz-controls {
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+
+    #deepep-analysis .viz-toolbar {
+      padding: 9px 10px;
+    }
+
+    #deepep-analysis .viz-controls-primary {
+      gap: 8px;
+    }
+
+    #deepep-analysis .viz-group {
+      width: 100%;
+    }
+
+    #deepep-analysis .viz-segmented-control {
+      width: 100%;
+    }
+
+    #deepep-analysis .viz-segment {
+      flex: 1 1 auto;
+    }
+
+    #deepep-analysis .viz-status-bar {
+      width: 100%;
+    }
+
+    #deepep-analysis .viz-canvas-wrap {
+      height: 236px;
+      min-height: 236px;
+    }
+  }
+</style>

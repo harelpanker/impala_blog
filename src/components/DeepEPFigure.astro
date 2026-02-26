@@ -1,0 +1,375 @@
+---
+const mathComm = String.raw`We model the full dispatch/combine round-trip time as:
+<k-math block>t_{\text{comm}} \approx 2 \cdot \left( L + \frac{V}{BW_{\text{eff}}} \right)</k-math>
+Where <k-math>L</k-math> is the fixed latency overhead (handshakes, synchronization) and <k-math>BW_{\text{eff}}</k-math> is the effective bandwidth. The payload <k-math>V</k-math> is the data volume each GPU must send/receive per direction:
+<k-math block>V \approx \underbrace{\frac{B}{P}}_{\text{tokens/rank}} \cdot \underbrace{k}_{\text{fan-out}} \cdot \underbrace{d \cdot s}_{\text{bytes/vec}}</k-math>`;
+
+const mathLL = String.raw`Low‑latency reduces <k-math>L</k-math> (kernel + signaling + staging overhead). High‑throughput increases <k-math>BW_{\text{eff}}</k-math> by coalescing and topology‑aware forwarding (e.g., NVLink↔RDMA hierarchy).`;
+
+const mathThroughput = String.raw`<k-math>R = B / t_{\text{step}}</k-math>`;
+
+const mathLatency = String.raw`<k-math>t_{\text{step}} \approx \max(t_{\text{compute}},\ t_{\text{comm}})</k-math>`;
+---
+
+<figure id="deepep-figure" class="viz-widget">
+  <div class="viz-widget-header">
+    <h3 class="viz-widget-title">DeepEP Kernel Selection</h3>
+    <span class="viz-kpi" id="deepepKpi">—</span>
+  </div>
+  <div class="viz-widget-body">
+    <div class="viz-controls">
+      <div class="viz-ctrl">
+        <div class="viz-ctrl-header">
+          <span class="viz-ctrl-label">Batch tokens</span>
+          <span class="viz-ctrl-value" id="tokensVal-deepep">—</span>
+        </div>
+        <input id="tokens-deepep" type="range" min="0" max="20" step="1" />
+      </div>
+
+      <div class="viz-ctrl">
+        <div class="viz-ctrl-header">
+          <span class="viz-ctrl-label">EP ranks</span>
+          <span class="viz-ctrl-value" id="epVal-deepep">—</span>
+        </div>
+        <input id="ep-deepep" type="range" min="2" max="64" step="2" />
+      </div>
+
+      <div class="viz-ctrl">
+        <div class="viz-ctrl-header">
+          <span class="viz-ctrl-label">Latency</span>
+          <span class="viz-ctrl-value" id="latVal-deepep">—</span>
+        </div>
+        <input id="lat-deepep" type="range" min="2" max="80" step="1" />
+      </div>
+
+      <div class="viz-ctrl">
+        <div class="viz-ctrl-header">
+          <span class="viz-ctrl-label">Bandwidth</span>
+          <span class="viz-ctrl-value" id="bwVal-deepep">—</span>
+        </div>
+        <input id="bw-deepep" type="range" min="5" max="120" step="1" />
+      </div>
+
+      <div class="viz-ctrl">
+        <div class="viz-ctrl-header">
+          <span class="viz-ctrl-label">Compute/tok</span>
+          <span class="viz-ctrl-value" id="ctokVal-deepep">—</span>
+        </div>
+        <input id="ctok-deepep" type="range" min="0.05" max="2.0" step="0.01" />
+      </div>
+
+      <div class="viz-ctrl">
+        <div class="viz-ctrl-header">
+          <span class="viz-ctrl-label">Expert skew</span>
+          <span class="viz-ctrl-value" id="skewVal-deepep">—</span>
+        </div>
+        <input id="skew-deepep" type="range" min="0" max="1" step="0.01" />
+      </div>
+    </div>
+
+    <div class="viz-toolbar">
+      <div class="viz-controls-primary">
+        <div class="viz-group">
+          <div class="viz-segmented-control">
+            <label class="viz-segment">
+              <input type="radio" name="deepepMode" id="deepepLL" checked />
+              <span>Low‑latency</span>
+            </label>
+            <label class="viz-segment">
+              <input type="radio" name="deepepMode" id="deepepHT" />
+              <span>High‑throughput</span>
+            </label>
+          </div>
+          <label class="viz-toggle">
+            <input type="checkbox" id="dpAnimToggle" checked />
+            Animate
+          </label>
+        </div>
+      </div>
+      <div class="viz-status-bar">
+        <div class="viz-status-content" id="deepepPill">—</div>
+      </div>
+    </div>
+
+    <div class="viz-split-row">
+      <div class="viz-card viz-card-plot">
+        <div class="viz-card-header">
+          <h4 class="viz-card-title">Comm Time: LL vs HT</h4>
+          <span class="viz-kpi" id="deepepCurveKpi">—</span>
+        </div>
+        <div class="viz-card-body">
+          <div class="viz-canvas-wrap">
+            <svg id="deepepCurve" class="viz-canvas" aria-label="Low-latency vs high-throughput comm curve" role="img"></svg>
+          </div>
+          <div class="viz-legend" aria-label="DeepEP curves legend">
+            <span class="viz-legend-item"><span class="viz-legend-swatch" style="background: var(--dbo);"></span> Low‑latency</span>
+            <span class="viz-legend-item"><span class="viz-legend-swatch" style="background: var(--comm);"></span> High‑throughput</span>
+          </div>
+          <p class="viz-card-caption">LL wins for small batches (lower L), HT wins for large (higher BW_eff).</p>
+        </div>
+      </div>
+
+      <div class="viz-card viz-card-table">
+        <div class="viz-card-header">
+        <h4 class="viz-card-title">Throughput & Latency Analysis</h4>
+      </div>
+      <div class="viz-card-body">
+        <div class="viz-table-container">
+          <div class="viz-comparison-grid">
+            <div class="viz-col-header">Metric</div>
+            <div class="viz-col-header text-dbo">LL <span class="viz-sub">w/ DBO</span></div>
+            <div class="viz-col-header text-dbo">LL <span class="viz-sub">w/o DBO</span></div>
+            <div class="viz-col-header text-comm">HT <span class="viz-sub">w/ DBO</span></div>
+            <div class="viz-col-header text-comm">HT <span class="viz-sub">w/o DBO</span></div>
+
+            <div class="viz-row-label">Comm Time</div>
+            <div id="metric-ll-comm" class="viz-val-cell">—</div>
+            <div id="metric-ll-comm-nodbo" class="viz-val-cell">—</div>
+            <div id="metric-ht-comm" class="viz-val-cell">—</div>
+            <div id="metric-ht-comm-nodbo" class="viz-val-cell">—</div>
+
+            <div class="viz-row-label">Step Latency</div>
+            <div id="metric-ll-lat" class="viz-val-cell">—</div>
+            <div id="metric-ll-lat-nodbo" class="viz-val-cell">—</div>
+            <div id="metric-ht-lat" class="viz-val-cell">—</div>
+            <div id="metric-ht-lat-nodbo" class="viz-val-cell">—</div>
+
+            <div class="viz-row-label">Throughput</div>
+            <div id="metric-ll-tps" class="viz-val-cell">—</div>
+            <div id="metric-ll-tps-nodbo" class="viz-val-cell">—</div>
+            <div id="metric-ht-tps" class="viz-val-cell">—</div>
+            <div id="metric-ht-tps-nodbo" class="viz-val-cell">—</div>
+          </div>
+        </div>
+        <div class="viz-card-caption" style="margin-top: 16px;">
+          <p style="margin-bottom: 4px;">
+            <b>Throughput:</b> <span class="math-comm" set:html={mathThroughput}></span> (tokens/sec)
+          </p>
+          <p>
+            <b>Latency:</b> <span class="math-dbo" set:html={mathLatency}></span> (with DBO)
+          </p>
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <div class="viz-card l-body-outset">
+      <div class="viz-card-header">
+        <h4 class="viz-card-title">Topology Sketch</h4>
+        <span class="viz-kpi" id="deepepTopoKpi">—</span>
+      </div>
+      <div class="viz-card-body">
+        <div class="viz-canvas-wrap">
+          <svg id="deepepTopo" class="viz-canvas" aria-label="Topology diagram" role="img"></svg>
+        </div>
+        <p class="viz-card-caption"><b style="color: var(--comm);">HT:</b> NVLink gather → RDMA → NVLink scatter. <b style="color: var(--dbo);">LL:</b> direct RDMA, double‑buffered.</p>
+      </div>
+    </div>
+
+    <div class="viz-card l-body-outset">
+      <div class="viz-card-header">
+        <h4 class="viz-card-title">Double Buffering Schedule</h4>
+        <span class="viz-kpi" id="deepepTimeKpi">—</span>
+      </div>
+      <div class="viz-card-body">
+        <div class="viz-canvas-wrap">
+          <svg id="deepepTimeline" class="viz-canvas" aria-label="DeepEP low-latency timeline" role="img"></svg>
+        </div>
+        <p class="viz-card-caption">Double buffering prevents overwriting in‑flight RDMA buffers, enabling safe overlap.</p>
+      </div>
+    </div>
+
+    <details class="viz-details">
+      <summary>Math view</summary>
+      <div class="viz-details-content">
+        <p set:html={mathComm}></p>
+        <p set:html={mathLL}></p>
+      </div>
+    </details>
+  </div>
+  <figcaption>
+    DeepEP dispatch/compose kernel intuition: <b>low‑latency</b> reduces fixed overhead, while <b>high‑throughput</b> improves effective bandwidth via topology‑aware forwarding.
+    The double‑buffering sketch shows how overlap stays safe without overwriting in‑flight RDMA buffers.
+  </figcaption>
+</figure>
+
+<style>
+  /* Default to full screen (l-screen behavior) */
+  #deepep-figure {
+    grid-column: screen;
+  }
+
+  /* On wide screens, restrict to page width */
+  @media (min-width: 1600px) {
+    #deepep-figure {
+      grid-column: page;
+    }
+  }
+
+  .viz-split-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+    align-items: stretch;
+  }
+
+  .viz-split-row > .viz-card {
+    min-width: 0; /* Critical for grid to shrink items */
+  }
+
+  @media (max-width: 1100px) {
+    .viz-split-row {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  /* Compact controls override */
+  .viz-controls {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .viz-ctrl {
+    padding: 8px 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .viz-ctrl-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 4px;
+  }
+
+  .viz-ctrl-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--fg);
+    white-space: nowrap;
+  }
+
+  .viz-ctrl-value {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: var(--muted);
+  }
+
+  .viz-ctrl input[type="range"] {
+    display: block;
+    width: 100%;
+    margin: 4px 0 0;
+    accent-color: var(--accent);
+    height: 4px;
+  }
+
+  /* Toolbar improvements */
+  .viz-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .viz-segmented-control {
+    display: flex;
+    background: var(--surface-2);
+    padding: 3px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+
+  .viz-segment {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 12px;
+    font-family: var(--font-body);
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--muted);
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.15s ease;
+    user-select: none;
+  }
+
+  .viz-segment:hover {
+    color: var(--fg);
+  }
+
+  .viz-segment:has(input:checked) {
+    background: var(--surface);
+    color: var(--fg);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    font-weight: 600;
+  }
+
+  .viz-segment input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  /* Table styles */
+  .viz-table-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: -16px; /* Offset card padding */
+    padding: 16px;
+    flex-grow: 1; /* Fill available space */
+    display: flex;
+    flex-direction: column;
+    justify-content: center; /* Center vertically */
+  }
+
+  .viz-comparison-grid {
+    display: grid;
+    grid-template-columns: minmax(80px, 1fr) repeat(4, minmax(60px, 1fr));
+    gap: 4px;
+    font-size: 0.75rem;
+    min-width: 360px;
+    width: 100%;
+  }
+
+  .viz-col-header {
+    font-weight: 600;
+    color: var(--muted);
+    font-size: 0.75rem;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 4px;
+  }
+
+  .viz-col-header.text-dbo { color: var(--dbo); }
+  .viz-col-header.text-comm { color: var(--comm); }
+
+  .viz-sub {
+    display: block;
+    font-size: 0.65rem;
+    font-weight: 400;
+    opacity: 0.8;
+  }
+
+  .viz-row-label {
+    color: var(--muted);
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+  }
+
+  .viz-val-cell {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--fg);
+    padding: 4px 0;
+  }

@@ -1,0 +1,325 @@
+---
+title: "Wide‑EP Mixture-of-Experts (MoE) Serving (Part 2/3): Dual-Batch Overlap (DBO), Kernel Crossover, and the Hardware Cliff"
+description: "Part 2 of 3: convert the model into tuning decisions—Dual-Batch Overlap (DBO), DeepEP low-latency (LL) vs high-throughput (HT) crossover, and where hardware locality boundaries create throughput cliffs."
+author: "Impala Team"
+pubDate: 2026-02-15
+tags:
+  - MoE
+  - vLLM
+  - DBO
+  - DeepEP
+  - Performance
+seriesId: "wide-ep-serving"
+seriesTitle: "Wide‑EP MoE Serving"
+part: 2
+totalParts: 3
+reference: false
+featured: false
+draft: false
+---
+
+import DBOTimeline from '../../components/DBOTimeline.astro';
+import DBOInteractiveFigure from '../../components/DBOInteractiveFigure.astro';
+import DeepEPMechanics from '../../components/DeepEPMechanics.astro';
+import DeepEPAnalysis from '../../components/DeepEPAnalysis.astro';
+
+## Making Wide‑EP Fast in Practice
+
+Part 2 turns the Part 1 model into a concrete performance playbook: overlap[^p2-dbo], kernel mode selection[^p2-llht], and topology-aware deployment choices.
+
+### Notation recap (from Part 1)
+
+- <k-math>{String.raw`B`}</k-math>: global tokens per MoE layer step.
+- <k-math>{String.raw`P`}</k-math>: expert-parallel ranks.
+- <k-math>{String.raw`L`}</k-math>: effective fixed comm overhead.
+- <k-math>{String.raw`BW_{\text{eff}}`}</k-math>: achieved collective bandwidth.
+- <k-math>{String.raw`\gamma`}</k-math>: straggler factor (max/mean per-rank load).
+
+---
+## Dual-Batch Overlap (DBO): The art of hiding the wire
+
+Sequential execution is wasteful. In a naive implementation, GPUs sit idle while the network moves data, and then the network sits idle while the GPUs crunch numbers.
+
+**Dual-Batch Overlap (DBO)** is the standard solution. It relies on a technique called **double buffering** (or "ping-pong" buffering) to parallelize work.
+
+In a standard sequential flow, you have one buffer: the network fills it, then the GPU reads it. The resource not working is idle.
+With double buffering, we allocate **two** sets of communication buffers:
+1.  **Compute Phase**: The GPU processes tokens from **Buffer A** (which arrived in the previous step).
+2.  **Comm Phase**: Simultaneously, the NIC[^p2-nic] streams the *next* set of tokens into **Buffer B**.
+
+When both are finished, they swap roles. This allows us to fetch the data for the *next* micro-batch while computing the *current* one.
+
+<DBOTimeline />
+
+### How overlap works
+
+Without overlap, you pay the sum of the latencies:
+<k-math block>{String.raw`t_{\text{seq}} \approx t_{\text{comm}} + t_{\text{compute}}`}</k-math>
+
+With ideal pipelining (steady state), the step time is determined by the *slowest* component:
+<k-math block>{String.raw`t_{\text{dbo}} \approx \max\left(t_{\text{comm}},\ t_{\text{compute}}\right)`}</k-math>
+
+This implies a theoretical speedup limit of <k-math>{String.raw`2\times`}</k-math> (when <k-math>{String.raw`t_{\text{comm}} = t_{\text{compute}}`}</k-math>). This is a **steady‑state** result: the first and last micro‑batch pay full fill/drain overhead. The max model applies when per‑step time dominates the pipeline startup cost—typically when you process many micro‑batches (large <k-math>{String.raw`B`}</k-math>). For small batches, add ~1 extra step of latency for fill/drain.
+
+It also reveals the failure mode.
+
+### The "Exposed Wire" Problem
+
+DBO is not magic. It relies on "compute cover"—using the time spent calculating experts to hide the time spent moving tokens. This creates two distinct operating regimes:
+
+1.  **Compute‑dominant (<k-math>{String.raw`t_{\text{compute}} \ge t_{\text{comm}}`}</k-math>)**: The GPU takes longer to compute than the network takes to send. Network latency is effectively zero (hidden). Throughput is compute-bound.
+2.  **Comm‑dominant (<k-math>{String.raw`t_{\text{comm}} > t_{\text{compute}}`}</k-math>)**: The network is too slow. The GPU finishes its work and then *waits*. Throughput is capped by the wire.
+
+> **Tuning DBO: The Control Panel**
+>
+> *   **Enable it:** <k-code>{'--enable-dbo'}</k-code> is essential for hiding inter-node latency, but it costs HBM[^p2-hbm] (for double buffering).
+> *   **Protect small batches:** Use <k-code>{'--dbo-prefill-token-threshold'}</k-code> (default 512) and <k-code>{'--dbo-decode-token-threshold'}</k-code> (default 32) to disable overlap when the batch is too small to justify the pipeline overhead. **Increase these** if you see regressions at low concurrency.
+> *   **Balance Compute vs. Comm:** <k-code>VLLM_DBO_COMM_SMS</k-code> (default 20) reserves GPU SMs to drive the network.
+>     *   **Increase if:** Network transfers are jittery or lagging.
+>     *   **Decrease if:** Expert kernels become the bottleneck and end-to-end throughput drops even when overlap is active. On an H100 (132 SMs), 20 SMs is ~15% of total SMs; on other GPUs, adjust proportionally.
+>
+> **Modeling the SM split explicitly**
+>
+> Let <k-math>{String.raw`S`}</k-math> be total SMs, <k-math>{String.raw`S_{\text{comm}}`}</k-math> be <k-code>VLLM_DBO_COMM_SMS</k-code>, and <k-math>{String.raw`\rho = S_{\text{comm}}/S`}</k-math>.
+> A practical first-order model is:
+>
+> <k-math block>{String.raw`t_{\text{compute}}(B,\rho) \approx \gamma \cdot \frac{B\cdot k}{P} \cdot \frac{c_{\text{tok},0}}{1-\rho}`}</k-math>
+>
+> where <k-math>{String.raw`c_{\text{tok},0}`}</k-math> is time/token with no SM reservation. The communication side also depends on <k-math>{String.raw`\rho`}</k-math> because extra comm SMs improve progress:
+>
+> <k-math block>{String.raw`t_{\text{comm}}(B,\rho) \approx 2 \cdot \left(L(\rho) + \frac{V_{\text{rank}}}{BW_{\text{eff}}(\rho)}\right)`}</k-math>
+>
+> So <k-code>VLLM_DBO_COMM_SMS</k-code> is a true trade-off knob: it can reduce <k-math>{String.raw`t_{\text{comm}}`}</k-math> while increasing <k-math>{String.raw`t_{\text{compute}}`}</k-math>.
+
+### Quantifying the overlap condition
+
+We can now turn the intuition from Part 1 into a concrete inequality. Plugging the SM-aware model into <k-math>{String.raw`t_{\text{compute}}(B,\rho) \ge t_{\text{comm}}(B,\rho)`}</k-math> gives the minimum batch size required to maintain overlap:
+
+> **The key inequality: minimum batch for overlap**
+>
+> <k-math block>{String.raw`B \gtrsim \frac{2 \cdot (P/k) \cdot L(\rho)}{\gamma \cdot \frac{c_{\text{tok},0}}{1-\rho} - \frac{2 \cdot d \cdot s}{BW_{\text{eff}}(\rho)}}`}</k-math>
+>
+> Scale <k-math>{String.raw`B`}</k-math> with <k-math>{String.raw`P`}</k-math>, or adding GPUs makes you slower.
+
+**Feasibility guard:** The denominator can be zero or negative. If <k-math>{String.raw`\gamma \cdot \frac{c_{\text{tok},0}}{1-\rho} \le \frac{2 \cdot d \cdot s}{BW_{\text{eff}}(\rho)}`}</k-math>, per‑token communication remains too large relative to per‑token compute, and full cover is impossible at any batch size. In that regime, you need better comm (<k-math>{String.raw`L(\rho)\downarrow, BW_{\text{eff}}(\rho)\uparrow`}</k-math>), faster expert kernels, or a smaller routed payload.
+
+When the denominator is positive, the numerator still scales linearly with <k-math>{String.raw`P`}</k-math>. For fixed <k-math>{String.raw`B`}</k-math>, pick <k-math>{String.raw`\rho`}</k-math> by minimizing
+<k-math>{String.raw`t_{\text{dbo}}(B,\rho)=\max\left(t_{\text{comm}}(B,\rho),t_{\text{compute}}(B,\rho)\right)`}</k-math>; the best operating point is usually near the balance line <k-math>{String.raw`t_{\text{comm}} \approx t_{\text{compute}}`}</k-math>.
+
+This is the second "key takeaway": **As you add GPUs to your cluster, you must increase your batch size just to maintain the same level of overlap efficiency.** If you scale <k-math>{String.raw`P`}</k-math> without scaling <k-math>{String.raw`B`}</k-math>, you strip away the compute cover and expose the raw network latency.
+
+### Single-node DBO: when it is actually worth it
+
+Single-node setups (NVLink/xGMI only) have much better <k-math>{String.raw`L`}</k-math> and <k-math>{String.raw`BW_{\text{eff}}`}</k-math> than multi-node RDMA[^p2-rdma], so DBO is not automatically a win. The best way to think about it:
+
+- If comm is already tiny, DBO has little headroom. When <k-math>{String.raw`t_{\text{comm}} \ll t_{\text{compute}}`}</k-math>, speedup is small because <k-math>{String.raw`t_{\text{seq}} \approx t_{\text{compute}}`}</k-math> even without overlap.
+- DBO is strongest near balance. You get the biggest gain when <k-math>{String.raw`2t_d`}</k-math> and <k-math>{String.raw`t_c`}</k-math> are of similar magnitude (the overlap frontier).
+- Very small batches can regress. Pipeline fill/drain and synchronization overhead can dominate; keep DBO thresholds high enough to avoid forcing overlap at low concurrency.
+- SM reservation matters more on-node. Because comm is faster, over-reserving comm SMs can hurt more than it helps. In practice, start with a lower <k-code>VLLM_DBO_COMM_SMS</k-code> than your cross-node setting and increase only if comm jitter is visible.
+
+A practical keep/remove rule for single-node:
+
+1. Measure step-time decomposition with DBO off.
+2. Enable DBO and sweep <k-code>VLLM_DBO_COMM_SMS</k-code> in a small range.
+3. Keep DBO only if end-to-end throughput and tail latency improve at your target batch/concurrency, not just synthetic peak.
+
+### Real-world numbers: The 2-Node Cliff
+
+Let's put concrete numbers on this for a standard **2-node cluster** (16 GPUs total), serving DeepSeek-V3 (<k-math>{String.raw`d=7168, k=8`}</k-math>) in FP8.
+
+When you span 2 nodes, your effective bandwidth (<k-math>{String.raw`BW_{\text{eff}}`}</k-math>) is capped by the inter-node interconnect. Here is how common hardware stacks compare:
+
+| Hardware Stack | Interconnect | Per-GPU Link Speed | Peak BW (<k-math>{String.raw`BW_{\text{peak}}`}</k-math>) | Realized <k-math>{String.raw`BW_{\text{eff}}`}</k-math> (est.) | Min Batch <k-math>{String.raw`B`}</k-math> for DBO (operational target) |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| [**NVIDIA H100/H200**](https://www.nvidia.com/en-us/data-center/h100/) | [InfiniBand NDR / CX7](https://www.nvidia.com/en-us/networking/infiniband-adapters/) | 400 Gbps (per‑port, raw) | 50 GB/s | ~36‑41 GB/s | ~72k‑96k |
+| [**AMD MI300X**](https://rocm.blogs.amd.com/software-tools-optimization/mi300x-rccl-xgmi/README.html) | Broadcom Thor2 / RoCE | 400 Gbps | 50 GB/s | ~32‑38 GB/s | ~80k‑112k |
+| [**AWS P5 (H100)**](https://aws.amazon.com/ec2/instance-types/p5/) | [EFA v2](https://aws.amazon.com/hpc/efa/) | 400 Gbps (per‑port, raw) | 50 GB/s | ~26‑34 GB/s | ~96k‑160k |
+| [**NVIDIA B200**](https://www.nvidia.com/en-us/data-center/b200/) | [ConnectX‑8](https://www.nvidia.com/en-us/networking/infiniband-adapters/) | 800 Gbps (per‑port, raw) | 100 GB/s | ~70‑82 GB/s | ~24k‑40k |
+| [**GB200 NVL72**](https://www.nvidia.com/en-us/data-center/gb200-nvl72/) | NVLink Switch | N/A (In-Rack) | 900 GB/s | ~650‑800 GB/s | ~2k‑8k |
+
+*All link speeds are raw signaling rates; effective throughput after encoding/protocol overhead is lower. Realized <k-math>{String.raw`BW_{\text{eff}}`}</k-math> values and batch targets above are **operational ranges** (not theoretical minima), assuming DeepSeek‑class shape (<k-math>{String.raw`d=7168,k=8,P=16`}</k-math>), moderate routing skew (<k-math>{String.raw`\gamma \approx 1.05\text{–}1.15`}</k-math>), and DBO SM reservation in the common range (<k-math>{String.raw`\rho \approx 0.10\text{–}0.20`}</k-math>, e.g., <k-code>VLLM_DBO_COMM_SMS</k-code> ≈ 12–28 on H100).*
+
+**The Cliff:** Inside a single node, the fast fabric (NVLink at [~450 GB/s/GPU](https://resources.nvidia.com/en-us-tensor-core), or xGMI at ~300+ GB/s) gives you abundant bandwidth. The moment you add a second node, your effective bandwidth drops to ~40 GB/s (400G IB/RoCE).
+
+**This is a 7–10× drop in bandwidth.** To maintain the inequality <k-math>{String.raw`t_{\text{compute}} \ge t_{\text{comm}}`}</k-math>, you must increase your batch size <k-math>{String.raw`B`}</k-math> by roughly the same factor (or more, due to latency <k-math>{String.raw`L`}</k-math>) when you cross the node boundary. This cliff is the central challenge of multi‑node MoE serving, regardless of GPU vendor.
+
+### Use the widget to build intuition
+
+The widget below visualizes exactly this dynamic.
+*   **Try this**: Push "Expert Parallelism" to 64. Watch the "Compute" bar shrink until it's shorter than "Comm".
+*   **Then**: Push "Batch tokens" to the right to see how a huge batch restores the balance.
+
+For readability, the widget uses an equivalent **effective-parameter** form: <k-math>{String.raw`L_{\text{eff}}, BW_{\text{eff}}, c_{\text{tok,eff}}`}</k-math>.
+This means SM partition effects (e.g., <k-code>VLLM_DBO_COMM_SMS</k-code>, or <k-math>{String.raw`\rho`}</k-math>) are folded into the slider values rather than exposed as a separate control.
+
+<DBOInteractiveFigure />
+
+Pro tip: on the “Step Time vs Batch Size” chart, focus on where the **compute** curve sits relative to **comm**. If compute is below comm, overlap will not save you.
+
+---
+
+DBO tells you *when* overlap helps. The next question is *which kernel* to use for the communication itself.
+
+## DeepEP low-latency (LL) vs high-throughput (HT): a crossover, not a religion
+
+In Part 1, we modeled communication time as <k-math>{String.raw`t_{\text{comm}} \approx 2 \cdot (L + V/BW_{\text{eff}})`}</k-math>.
+[DeepEP](https://github.com/deepseek-ai/DeepEP)—an open‑source CUDA kernel library by DeepSeek for MoE dispatch/combine—gives you a direct way to attack these two terms separately. It exposes two families of dispatch/combine kernels, and the right choice depends entirely on which side of the "Wide-EP Trap" (Part 1) you are currently stuck in.
+
+### The two modes
+
+1.  **Low-latency kernel (LL)**: **Attacks <k-math>{String.raw`L`}</k-math>.**
+    *   **Mechanism:** Uses pre-allocated buffers and simplified signaling (often just RDMA writes with immediate data) to shave off every microsecond of handshake overhead.
+    *   **Time:** <k-math>{String.raw`t_{\text{LL}} \approx \underbrace{(t_{\text{kernel}} + L_{\text{RDMA}})}_{\text{Low fixed cost}} + \underbrace{\frac{V}{BW_{\text{frag}}}}_{\text{Slow transfer}}`}</k-math> (Direct RDMA suffers from fragmentation/congestion).
+    *   **Best for:** Small batches, high expert parallelism (where <k-math>{String.raw`B/P`}</k-math> is small), or latency-sensitive decode steps.
+    *   **The Cost:** **Memory.** LL often requires <k-math>{String.raw`O(P)`}</k-math> registered buffer space per rank. For our <k-math>{String.raw`P=64`}</k-math> example, maintaining dedicated buffers for every peer (to handle skew) can consume **~1–2 GB** of HBM. On memory‑constrained nodes (Part 1), this fights directly against your KV cache[^p2-kv].
+
+2.  **High-throughput kernel (HT)**: **Attacks <k-math>{String.raw`BW_{\text{eff}}`}</k-math>.**
+    *   **Mechanism:** Uses hierarchical collectives. Instead of every GPU talking to every other GPU (naive all-to-all), GPUs within a node first **gather** their data via NVLink, then a designated "leader" performs the heavy RDMA transfer to other nodes, followed by a local **scatter**.
+    *   **Time:** <k-math>{String.raw`t_{\text{HT}} \approx \underbrace{(3t_{\text{kernel}} + 2L_{\text{NVL}} + L_{\text{RDMA}})}_{\text{High fixed cost}} + \underbrace{\frac{V}{BW_{\text{peak}}}}_{\text{Fast transfer}}`}</k-math> (Hierarchical aggregation enables peak RDMA bandwidth).
+    *   **Best for:** Large "offline" batches where payload size <k-math>{String.raw`V`}</k-math> is huge. This is essential for crossing the "2-Node Cliff" discussed earlier in this part efficiently.
+    *   **The Cost:** **Latency.** The extra gather/scatter steps add a fixed setup cost. However, it is memory-efficient: it only buffers the aggregated payload (**~230 MB** with double buffering). If your payload is small, HT is actually *slower* than LL.
+
+<DeepEPMechanics />
+
+### Real-world intuition: Fragmented vs Peak Bandwidth
+
+Why do we model two different bandwidths? Because the all-to-all variable-size collective (<k-code>all_to_allv</k-code>)[^p2-alltoallv] efficiency depends heavily on message size and topology.
+
+| Mode | Realized BW (est. on 400G) | Why? |
+| :--- | :--- | :--- |
+| **LL (Direct RDMA)** | **~20–30 GB/s** (Fragmented) | Many small, non-contiguous messages. Congestion from random access. |
+| **HT (Hierarchical)** | **~42–48 GB/s** (Peak-ish) | Few large, coalesced messages. Topology-aware routing minimizes hops. |
+
+*Estimates based on typical 400Gbps RDMA efficiency (40–60% for fragmented traffic vs 85%+ for large contiguous bursts). See [DeepEP benchmarks](https://github.com/deepseek-ai/DeepEP#performance) for detailed performance characterization of LL vs HT kernels.*
+
+### The Crossover Point
+
+This is not a philosophical choice; it is an arithmetic one. You should switch from LL to HT exactly when the bandwidth gains outweigh the setup costs.
+
+> **vLLM Configuration:** Select your kernel backend using <k-code>{'--all2all-backend'}</k-code>.
+> *   Use <k-code>deepep_low_latency</k-code> for the LL kernel (latency-optimized).
+> *   Use <k-code>deepep_high_throughput</k-code> for the HT kernel (bandwidth-optimized).
+>
+> **Advanced Tuning Guide:**
+>
+> *   <k-code>VLLM_DEEPEP_BUFFER_SIZE_MB</k-code> (default 1024): Controls RDMA buffer size.
+>     *   **Increase when:** You see buffer overflow errors or run extremely large batches/hidden dims.
+>     *   **Decrease when:** You hit OOM and need to reclaim HBM for KV cache (especially at small batches).
+> *   <k-code>VLLM_DEEPEP_HIGH_THROUGHPUT_FORCE_INTRA_NODE</k-code>:
+>     *   **Set to 1 for large NVLink domains (e.g., NVL72):** Treats the entire fabric as one node to use NVLink instead of RDMA.
+>     *   **Keep at 0 for multi‑node clusters:** Essential for standard H100/MI300X clusters where nodes are connected by IB/RoCE.
+> *   <k-code>VLLM_DEEPEP_LOW_LATENCY_USE_MNNVL</k-code>:
+>     *   **Set to 1 for multi‑node NVLink domains (LL mode):** Allows the Low-Latency kernel to write directly over cross-node NVLink.
+
+If we model each as <k-math>{String.raw`(L, BW)`}</k-math>, choose HT when:
+
+<k-math block>{String.raw`L_{\text{HT}} + \frac{V}{BW_{\text{HT}}} < L_{\text{LL}} + \frac{V}{BW_{\text{LL}}}`}</k-math>
+
+Solving yields the crossover payload:
+
+<k-math block>{String.raw`V^{*} = \frac{L_{\text{LL}}-L_{\text{HT}}}{\frac{1}{BW_{\text{HT}}}-\frac{1}{BW_{\text{LL}}}}`}</k-math>
+
+Note: because LL has *lower* latency but *lower* bandwidth than HT, we have <k-math>{String.raw`L_{\text{LL}} < L_{\text{HT}}`}</k-math> and <k-math>{String.raw`BW_{\text{LL}} < BW_{\text{HT}}`}</k-math>. Both numerator and denominator are negative, so <k-math>{String.raw`V^{*}`}</k-math> is positive. Below <k-math>{String.raw`V^{*}`}</k-math> LL wins (lower fixed cost dominates); above it HT wins (higher bandwidth dominates).
+
+In Impala’s offline huge‑batch setting, we usually operate above this crossover—so HT is often the right starting point. The value of the crossover framing is that you can **measure** it and justify that choice on your own hardware/topology.
+
+### Real-world worked example: 16‑GPU H100 cluster serving DeepSeek‑V3
+
+Suppose you measured the following on a 2‑node H100 cluster (<k-math>{String.raw`P = 16`}</k-math>):
+
+| Parameter | LL kernel | HT kernel |
+| :--- | :--- | :--- |
+| <k-math>{String.raw`L`}</k-math> | 35 µs | 120 µs |
+| <k-math>{String.raw`BW_{\text{eff}}`}</k-math> | 22 GB/s | 44 GB/s |
+
+And from compute profiling: <k-math>{String.raw`c_{\text{tok}} = 1.8`}</k-math> µs/token, <k-math>{String.raw`\gamma = 1.1`}</k-math>.
+
+**Step A — Kernel crossover (<k-math>{String.raw`V^*`}</k-math>):**
+
+<k-math block>{String.raw`V^{*} = \frac{L_{\text{LL}} - L_{\text{HT}}}{\frac{1}{BW_{\text{HT}}} - \frac{1}{BW_{\text{LL}}}} = \frac{35\mu s - 120\mu s}{\frac{1}{44\ \text{GB/s}} - \frac{1}{22\ \text{GB/s}}} = \frac{-85\mu s}{-22.7\ \text{ps/B}} \approx 3.7\ \text{MB}`}</k-math>
+
+Per‑rank payload at <k-math>{String.raw`B = 8192`}</k-math>: <k-math>{String.raw`V = \frac{8192}{16} \cdot 8 \cdot 7168 \cdot 1 \approx 29\ \text{MB} \gg V^*`}</k-math>. **Use HT.**
+
+**Step B — DBO feasibility check:**
+
+<k-math block>{String.raw`\gamma \cdot c_{\text{tok}} = 1.1 \times 1.8\ \mu s = 1.98\ \mu s/\text{tok}`}</k-math>
+<k-math block>{String.raw`\frac{2 \cdot d \cdot s}{BW_{\text{eff}}} = \frac{2 \times 7168 \times 1}{44 \times 10^9} \approx 0.33\ \mu s/\text{tok}`}</k-math>
+
+Denominator is positive (1.98 > 0.33), so DBO can work. Minimum batch:
+
+<k-math block>{String.raw`B \gtrsim \frac{2 \cdot (16/8) \cdot 120\ \mu s}{1.98 - 0.33\ \mu s/\text{tok}} \approx \frac{480\ \mu s}{1.65\ \mu s/\text{tok}} \approx 291\ \text{tokens}`}</k-math>
+
+Our batch of 8192 is well above the threshold. **Enable DBO with HT kernels.**
+
+### Interactive Analysis: Finding Your Crossover
+
+The theory is clear, but the actual crossover point depends on your specific hardware and workload. Use the interactive tool below to explore the trade-off space.
+
+**What to look for:**
+- **Find the Crossover**: Drag the `Batch tokens` slider to see exactly where the Low-Latency (LL) and High-Throughput (HT) curves intersect. This is your decision boundary.
+- **Visualize the Mechanism**: Toggle `Animate` to see how LL minimizes the fixed handshake overhead, while HT compresses the bulk transfer time via bandwidth efficiency.
+- **Check the Impact**: Watch the analysis table to see how your kernel choice ripples through to end-to-end throughput and latency.
+
+<DeepEPAnalysis />
+
+---
+
+Kernel choice is only half the story: the same model can land in very different comm/compute regimes depending on hardware locality. Before tuning knobs, anchor on where your interconnect cliff appears.
+
+## Hardware stacks: where the cliff falls
+
+There are two deployment questions hiding inside “which GPU is faster?”:
+
+1) What is the *largest locality domain* where GPU↔GPU traffic stays on a dedicated fabric (and never touches the NIC)?
+2) What happens to your all‑to‑allv once it spills outside that domain (into RDMA + switches + congestion)?
+
+**Key idea:** Wide‑EP economics are set by how much dispatch/combine stays inside the “cheap” locality domain versus how much spills into the “expensive” scale‑out network.
+
+### Minimal reference table (numbers + sources)
+
+| Stack | Locality domain (cliff boundary) | Scale‑up anchor | Scale‑out anchor | Sources |
+|---|---|---|---|---|
+| NVIDIA H100/H200 | 8 GPUs / HGX node | NVLink: 900 GB/s bidirectional per GPU | ConnectX‑7: up to 400 Gb/s | [H100/H200](https://www.nvidia.com/en-us/data-center/h100/), [Hopper](https://www.nvidia.com/en-us/data-center/technologies/hopper-architecture/), [CX7](https://docs.nvidia.com/networking/display/connectx7vpi/introduction) |
+| NVIDIA GB200 NVL72 | 72 GPUs / rack domain | NVLink Switch: 130 TB/s rack, 1.8 TB/s bidirectional GPU↔GPU (HGX B200) | ConnectX‑8: up to 800 Gb/s | [GB200 NVL72](https://www.nvidia.com/en-us/data-center/gb200-nvl72/), [HGX](https://www.nvidia.com/en-us/data-center/hgx/), [CX8](https://docs.nvidia.com/networking/display/connectx8ocp3/introduction) |
+| AMD MI300X | 8 GPUs / platform | 896 GB/s aggregate bidirectional P2P (spec); ~315–336 GB/s aggregated unidirectional measured xGMI | 400 Gb/s class NIC deployments are common | [MI300 platform](https://www.amd.com/en/products/accelerators/instinct/mi300/platform.html), [ROCm xGMI](https://rocm.blogs.amd.com/software-tools-optimization/mi300x-rccl-xgmi/README.html) |
+| Public MoE internode reference | Multi‑node DeepEP benchmark | BW_eff (normal kernels): ~43–58 GB/s | BW_eff (low-latency kernels): ~39–46 GB/s | [DeepEP README](https://raw.githubusercontent.com/deepseek-ai/DeepEP/main/README.md) |
+
+### How to read these numbers in our model
+
+- Unit conversion is direct arithmetic (for example, 400 Gb/s ≈ 50 GB/s raw line-rate ceiling).
+- Inference from topology + the model from Part 1: the comm cliff appears when <k-math>{String.raw`P`}</k-math> exceeds the locality domain size (typically ~8 on H100/H200/MI300X platforms, ~72 inside NVL72).
+- Post‑cliff <k-math>{String.raw`BW_{\text{eff}}`}</k-math> is workload- and congestion-dependent, so treat it as a measured runtime quantity (LL/HT choice and network load matter).
+
+### What this means for deployment
+
+For offline serving, cost scales with delivered tokens, not raw FLOPS.
+
+*   **Network‑heavy regimes** (Wide‑EP across many nodes): a larger locality domain directly lowers <k-math>{String.raw`L`}</k-math> and raises <k-math>{String.raw`BW_{\text{eff}}`}</k-math>, which relaxes the minimum batch for DBO. Platforms with extended NVLink domains (NVL72) or future high‑bandwidth inter‑node fabrics have a structural advantage here.
+*   **Compute‑bound regimes** (EP groups that fit within a single locality domain): standard multi‑GPU nodes (H100, MI300X) are very competitive, because the cliff never triggers and you get full intra‑node bandwidth.
+
+---
+
+[^p2-dbo]: **Dual-Batch Overlap (DBO)** overlaps communication with compute using double buffering. See [Dual-Batch Overlap (DBO): The art of hiding the wire](#dual-batch-overlap-dbo-the-art-of-hiding-the-wire).
+[^p2-llht]: **Low-latency (LL)** kernels reduce fixed overhead; **high-throughput (HT)** kernels increase realized bandwidth. See [DeepEP low-latency (LL) vs high-throughput (HT)](#deepep-low-latency-ll-vs-high-throughput-ht-a-crossover-not-a-religion).
+[^p2-nic]: **Network Interface Controller (NIC)** is the hardware endpoint for network I/O. Overview: [NIC](https://en.wikipedia.org/wiki/Network_interface_controller).
+[^p2-hbm]: **High-Bandwidth Memory (HBM)** is on-package GPU memory used by model weights, caches, and communication buffers. Overview: [HBM](https://en.wikipedia.org/wiki/High_Bandwidth_Memory).
+[^p2-rdma]: **Remote Direct Memory Access (RDMA)** enables direct memory transfer across machines with low CPU overhead. Overview: [RDMA](https://en.wikipedia.org/wiki/Remote_direct_memory_access).
+[^p2-kv]: **Key-value (KV) cache** stores attention keys/values reused across decoding steps. Overview: [Transformers cache explanation](https://huggingface.co/docs/transformers/main/cache_explanation).
+[^p2-alltoallv]: **All-to-all variable-size collective (`all-to-allv`)** lets each rank send different payload sizes to peers. References: [MPI Alltoallv](https://www.open-mpi.org/doc/current/man3/MPI_Alltoallv.3.php), [Collective operation](https://en.wikipedia.org/wiki/Collective_operation).
+
+
+### Next in the series
+
+In **Part 3**, we focus on operational stability: failure modes, EPLB/LPLB load balancing, portability across stacks, and the final decision flow for production runbooks.
+
+---
+
+## References (for this part)
+
+- DeepEP kernels and performance: [DeepEP repository](https://github.com/deepseek-ai/DeepEP), [DeepEP README (raw)](https://raw.githubusercontent.com/deepseek-ai/DeepEP/main/README.md)
+- Collective communication background: [Collective operation](https://en.wikipedia.org/wiki/Collective_operation), [MPI Alltoallv](https://www.open-mpi.org/doc/current/man3/MPI_Alltoallv.3.php)
+- Remote Direct Memory Access background: [RDMA](https://en.wikipedia.org/wiki/Remote_direct_memory_access)
+- NVIDIA H100/H200 and Hopper: [NVIDIA H100](https://www.nvidia.com/en-us/data-center/h100/), [Hopper Architecture](https://www.nvidia.com/en-us/data-center/technologies/hopper-architecture/)
+- NVIDIA GB200/HGX and ConnectX: [GB200 NVL72](https://www.nvidia.com/en-us/data-center/gb200-nvl72/), [NVIDIA HGX](https://www.nvidia.com/en-us/data-center/hgx/), [ConnectX-7](https://docs.nvidia.com/networking/display/connectx7vpi/introduction), [ConnectX-8](https://docs.nvidia.com/networking/display/connectx8ocp3/introduction)
+- AMD MI300X and xGMI: [AMD MI300 Platform](https://www.amd.com/en/products/accelerators/instinct/mi300/platform.html), [ROCm xGMI analysis](https://rocm.blogs.amd.com/software-tools-optimization/mi300x-rccl-xgmi/README.html)
+- Cloud networking references: [AWS P5](https://aws.amazon.com/ec2/instance-types/p5/), [AWS EFA](https://aws.amazon.com/hpc/efa/)

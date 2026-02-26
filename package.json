@@ -1,0 +1,29 @@
+{
+  "name": "impala-blog",
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Impala AI technical blog with interactive visualizations",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro",
+    "lint": "oxlint",
+    "lint:types": "oxlint --type-aware",
+    "lint:check": "oxlint --type-aware --type-check"
+  },
+  "dependencies": {
+    "@astrojs/mdx": "^4.3.13",
+    "@types/d3": "^7.4.3",
+    "astro": "5.17.1",
+    "d3": "^7.9.0",
+    "highlight.js": "^11.11.1",
+    "katex": "^0.16.28"
+  },
+  "devDependencies": {
+    "oxlint": "^1.40.0",
+    "oxlint-tsgolint": "^0.11.1",
+    "pdf-lib": "^1.17.1",
+    "puppeteer": "^24.37.3"
+  }
+}

@@ -1,0 +1,424 @@
+---
+---
+
+<figure class="viz-widget">
+  <div class="viz-widget-header">
+    <h3 class="viz-widget-title">DBO Pipeline: Sequential vs. Overlapped Execution</h3>
+  </div>
+  <div class="viz-widget-body">
+      <div class="viz-card">
+      <div class="viz-card-body">
+        <div class="viz-canvas-wrap dbo-timeline-wrap">
+          <svg id="dboTimeline" class="viz-canvas" aria-label="DBO Pipeline Timeline Diagram" role="img"></svg>
+        </div>
+        <div class="viz-legend dbo-legend">
+          <span class="viz-legend-item"><span class="viz-legend-swatch" style="background: var(--comm);"></span> Dispatch (comm)</span>
+          <span class="viz-legend-item"><span class="viz-legend-swatch" style="background: var(--compute);"></span> Expert Compute</span>
+          <span class="viz-legend-item"><span class="viz-legend-swatch" style="background: var(--comm); opacity: 0.6;"></span> Combine (comm)</span>
+          <span class="viz-legend-item"><span class="viz-legend-swatch" style="background: var(--muted-2, #94a3b8);"></span> Idle</span>
+        </div>
+        <p class="viz-card-caption">
+          <b>Top:</b> Without overlap, each step runs Dispatch → Compute → Combine sequentially. GPUs idle during network transfers; the network idles during compute.
+          <br/>
+          <b>Bottom:</b> With DBO, double buffering lets Step <i>N</i>'s compute overlap with Step <i>N+1</i>'s communication.
+          Steady-state step time drops from
+          <span style="white-space: nowrap;"><i>t</i><sub>comm</sub> + <i>t</i><sub>compute</sub></span>
+          to
+          <span style="white-space: nowrap;">max(<i>t</i><sub>comm</sub>, <i>t</i><sub>compute</sub>)</span>.
+          The shaded idle blocks show wasted GPU time that DBO eliminates.
+        </p>
+      </div>
+    </div>
+  </div>
+</figure>
+
+<script>
+function initDBOTimeline() {
+  // @ts-ignore
+  const d3 = window.d3;
+  if (!d3) {
+    requestAnimationFrame(initDBOTimeline);
+    return;
+  }
+
+  const svgEl = document.getElementById('dboTimeline');
+  if (!svgEl) return;
+  const container = svgEl.parentElement;
+  if (!container) return;
+
+  const draw = () => {
+    const W = container.clientWidth || 700;
+    const compact = W < 980;
+    const tight = W < 760;
+
+    const style = getComputedStyle(document.documentElement);
+    const COMM     = style.getPropertyValue('--comm').trim()    || '#2563eb';
+    const COMPUTE  = style.getPropertyValue('--compute').trim() || '#059669';
+    const COMBINE  = COMM;
+    const IDLE     = style.getPropertyValue('--muted-2')?.trim() || '#94a3b8';
+    const TEXT     = style.getPropertyValue('--fg')?.trim()      || '#1e293b';
+    const FONT_MONO = style.getPropertyValue('--font-mono')?.trim() || 'monospace';
+    const FONT_SANS = style.getPropertyValue('--font-body')?.trim() || 'sans-serif';
+
+    const M = {
+      top: tight ? 34 : 30,
+      left: tight ? 64 : 80,
+      right: tight ? 18 : 30,
+      bottom: 18
+    };
+    const iW = Math.max(260, W - M.left - M.right);
+    const barH = tight ? 22 : 24;
+    const rowGap = tight ? 10 : 8;
+    const sectionGap = compact ? 38 : 32;
+    const titleFontSize = tight ? 11 : 12;
+    const rowLabelFontSize = tight ? 11 : 12;
+    const stepLabelFontSize = tight ? 10 : 11;
+    const barTextFontSize = tight ? 10 : 11;
+    const eqFontSize = tight ? 11 : 12;
+    const showPhaseLabels = W >= 820;
+    const showBufferLabels = W >= 680;
+    const showSavedText = W >= 700;
+    const shortStepLabels = tight;
+
+    const gpuY = 0;
+    const nicY = barH + rowGap;
+    const seqStepLabelY = nicY + barH + rowGap + (tight ? 10 : 12);
+    const seqAnnotY = seqStepLabelY + (tight ? 18 : 20);
+    const seqEqY = seqAnnotY + (tight ? 13 : 14);
+    const seqBlockBottom = seqEqY + (tight ? 8 : 10);
+
+    const dGpuY = 0;
+    const dNicY = barH + rowGap;
+    const dStepLabelY = dNicY + barH + rowGap + (tight ? 10 : 12);
+    const ssY = dStepLabelY + (tight ? 16 : 18);
+    const ssEqY = ssY + (tight ? 14 : 16);
+
+    const dboTopY = M.top + seqBlockBottom + sectionGap;
+    const requiredH = dboTopY + ssEqY + M.bottom + 8;
+    const minH = tight ? 332 : compact ? 318 : 302;
+    const H = Math.max(requiredH, minH);
+    const nextHeight = `${Math.ceil(H)}px`;
+    if (container.style.height !== nextHeight) {
+      container.style.height = nextHeight;
+    }
+
+    const svg = d3.select(svgEl);
+    svg.selectAll('*').remove();
+    svg.attr('width', W)
+      .attr('height', H)
+      .attr('viewBox', `0 0 ${W} ${H}`);
+
+    const tD = 3;   // dispatch
+    const tC = 5;   // compute
+    const tB = 3;   // combine
+    const steps = 3;
+
+    /* ═══════════ SECTION 1: SEQUENTIAL ═══════════ */
+    const seqTotal = steps * (tD + tC + tB);
+    const xSeq = d3.scaleLinear().domain([0, seqTotal]).range([0, iW]);
+
+    const gSeq = svg.append('g').attr('transform', `translate(${M.left},${M.top})`);
+
+    // Section label
+    svg.append('text')
+      .attr('x', M.left + iW / 2)
+      .attr('y', M.top - 12)
+      .attr('text-anchor', 'middle')
+      .attr('fill', TEXT)
+      .attr('font-family', FONT_MONO)
+      .attr('font-size', `${titleFontSize}px`)
+      .attr('font-weight', '500')
+      .attr('letter-spacing', '0.05em')
+      .attr('style', 'text-transform: uppercase')
+      .text('Sequential (no overlap)');
+
+    // Row labels
+    gSeq.append('text').attr('x', -10).attr('y', gpuY + barH / 2 + 4)
+      .attr('text-anchor', 'end').attr('fill', TEXT)
+      .attr('font-family', FONT_MONO).attr('font-size', `${rowLabelFontSize}px`)
+      .text('GPU');
+    gSeq.append('text').attr('x', -10).attr('y', nicY + barH / 2 + 4)
+      .attr('text-anchor', 'end').attr('fill', TEXT)
+      .attr('font-family', FONT_MONO).attr('font-size', `${rowLabelFontSize}px`)
+      .text('NIC');
+
+    // Background tracks
+    [gpuY, nicY].forEach(y => {
+      gSeq.append('rect').attr('x', 0).attr('y', y)
+        .attr('width', iW).attr('height', barH)
+        .attr('fill', IDLE).attr('opacity', 0.12).attr('rx', 3);
+    });
+
+    for (let s = 0; s < steps; s++) {
+      const base = s * (tD + tC + tB);
+
+      // Dispatch  (NIC busy, GPU idle)
+      gSeq.append('rect').attr('x', xSeq(base)).attr('y', nicY)
+        .attr('width', xSeq(tD) - xSeq(0)).attr('height', barH)
+        .attr('fill', COMM).attr('rx', 3);
+      gSeq.append('rect').attr('x', xSeq(base)).attr('y', gpuY)
+        .attr('width', xSeq(tD) - xSeq(0)).attr('height', barH)
+        .attr('fill', IDLE).attr('opacity', 0.18).attr('rx', 3)
+        .attr('stroke', IDLE).attr('stroke-width', 1).attr('stroke-dasharray', '3 2');
+
+      // Compute  (GPU busy, NIC idle)
+      gSeq.append('rect').attr('x', xSeq(base + tD)).attr('y', gpuY)
+        .attr('width', xSeq(tC) - xSeq(0)).attr('height', barH)
+        .attr('fill', COMPUTE).attr('rx', 3);
+      gSeq.append('rect').attr('x', xSeq(base + tD)).attr('y', nicY)
+        .attr('width', xSeq(tC) - xSeq(0)).attr('height', barH)
+        .attr('fill', IDLE).attr('opacity', 0.18).attr('rx', 3)
+        .attr('stroke', IDLE).attr('stroke-width', 1).attr('stroke-dasharray', '3 2');
+
+      // Combine  (NIC busy, GPU idle)
+      gSeq.append('rect').attr('x', xSeq(base + tD + tC)).attr('y', nicY)
+        .attr('width', xSeq(tB) - xSeq(0)).attr('height', barH)
+        .attr('fill', COMBINE).attr('opacity', 0.6).attr('rx', 3);
+      gSeq.append('rect').attr('x', xSeq(base + tD + tC)).attr('y', gpuY)
+        .attr('width', xSeq(tB) - xSeq(0)).attr('height', barH)
+        .attr('fill', IDLE).attr('opacity', 0.18).attr('rx', 3)
+        .attr('stroke', IDLE).attr('stroke-width', 1).attr('stroke-dasharray', '3 2');
+
+      // Step labels
+      const mid = base + (tD + tC + tB) / 2;
+      gSeq.append('text').attr('x', xSeq(mid)).attr('y', seqStepLabelY)
+        .attr('text-anchor', 'middle').attr('fill', TEXT)
+        .attr('font-family', FONT_MONO)
+        .attr('font-size', `${stepLabelFontSize}px`).attr('opacity', 0.6)
+        .text(shortStepLabels ? `S${s + 1}` : `Step ${s + 1}`);
+
+      // Phase labels inside bars (only on step 1 for clarity)
+      if (s === 0 && showPhaseLabels) {
+        const phaseLabel = (x, y, text) => {
+          gSeq.append('text').attr('x', x).attr('y', y + barH / 2 + 4)
+            .attr('text-anchor', 'middle').attr('fill', '#fff')
+            .attr('font-family', FONT_SANS)
+            .attr('font-size', `${barTextFontSize}px`).attr('font-weight', '600')
+            .text(text);
+        };
+        phaseLabel(xSeq(base + tD / 2), nicY, 'Disp');
+        phaseLabel(xSeq(base + tD + tC / 2), gpuY, 'Comp');
+        phaseLabel(xSeq(base + tD + tC + tB / 2), nicY, 'Comb');
+      }
+    }
+
+    // Total time annotation
+    gSeq.append('line').attr('x1', 0).attr('x2', iW)
+      .attr('y1', seqAnnotY).attr('y2', seqAnnotY)
+      .attr('stroke', TEXT).attr('opacity', 0.3).attr('stroke-width', 1);
+    gSeq.append('text').attr('x', iW / 2).attr('y', seqEqY)
+      .attr('text-anchor', 'middle').attr('fill', TEXT)
+      .attr('font-family', FONT_MONO)
+      .attr('font-size', `${eqFontSize}px`).attr('font-weight', '500')
+      .text('t_step = t_comm + t_compute');
+
+
+    /* ═══════════ SECTION 2: DBO (OVERLAPPED) ═══════════ */
+    svg.append('text')
+      .attr('x', M.left + iW / 2)
+      .attr('y', dboTopY - 12)
+      .attr('text-anchor', 'middle')
+      .attr('fill', TEXT)
+      .attr('font-family', FONT_MONO)
+      .attr('font-size', `${titleFontSize}px`)
+      .attr('font-weight', '500')
+      .attr('letter-spacing', '0.05em')
+      .attr('style', 'text-transform: uppercase')
+      .text('DBO (double-buffered overlap)');
+
+    const gDbo = svg.append('g').attr('transform', `translate(${M.left},${dboTopY})`);
+
+    // In DBO, each "slot" is max(tComm, tC) wide.
+    const tComm = tD + tB;
+    const slot  = Math.max(tComm, tC);
+    const xDbo = d3.scaleLinear().domain([0, seqTotal]).range([0, iW]);
+
+    gDbo.append('text').attr('x', -10).attr('y', dGpuY + barH / 2 + 4)
+      .attr('text-anchor', 'end').attr('fill', TEXT)
+      .attr('font-family', FONT_MONO).attr('font-size', `${rowLabelFontSize}px`)
+      .text('GPU');
+    gDbo.append('text').attr('x', -10).attr('y', dNicY + barH / 2 + 4)
+      .attr('text-anchor', 'end').attr('fill', TEXT)
+      .attr('font-family', FONT_MONO).attr('font-size', `${rowLabelFontSize}px`)
+      .text('NIC');
+
+    // Background tracks
+    [dGpuY, dNicY].forEach(y => {
+      gDbo.append('rect').attr('x', 0).attr('y', y)
+        .attr('width', iW).attr('height', barH)
+        .attr('fill', IDLE).attr('opacity', 0.12).attr('rx', 3);
+    });
+
+    for (let s = 0; s < steps; s++) {
+      const commStart = s * slot;
+      const compStart = (s === 0) ? tComm : (s * slot);  // Step 1 compute starts after comm
+
+      // Comm (Dispatch + Combine)
+      gDbo.append('rect').attr('x', xDbo(commStart)).attr('y', dNicY)
+        .attr('width', xDbo(tD) - xDbo(0)).attr('height', barH)
+        .attr('fill', COMM).attr('rx', 3);
+      gDbo.append('rect').attr('x', xDbo(commStart + tD)).attr('y', dNicY)
+        .attr('width', xDbo(tB) - xDbo(0)).attr('height', barH)
+        .attr('fill', COMBINE).attr('opacity', 0.6).attr('rx', 3);
+
+      // Compute (GPU)
+      const compW = xDbo(tC) - xDbo(0);
+      gDbo.append('rect').attr('x', xDbo(compStart)).attr('y', dGpuY)
+        .attr('width', compW).attr('height', barH)
+        .attr('fill', COMPUTE).attr('rx', 3);
+
+      // Step labels
+      const mid = commStart + tComm / 2;
+      gDbo.append('text').attr('x', xDbo(mid)).attr('y', dStepLabelY)
+        .attr('text-anchor', 'middle').attr('fill', TEXT)
+        .attr('font-family', FONT_MONO)
+        .attr('font-size', `${stepLabelFontSize}px`).attr('opacity', 0.6)
+        .text(shortStepLabels ? `S${s + 1}` : `Step ${s + 1}`);
+
+      // "Buffer A/B" labels inside bars (first two only)
+      if (s < 2 && showBufferLabels) {
+        const buf = s % 2 === 0 ? 'A' : 'B';
+        gDbo.append('text')
+          .attr('x', xDbo(commStart + tComm / 2))
+          .attr('y', dNicY + barH / 2 + 4)
+          .attr('text-anchor', 'middle').attr('fill', '#fff')
+          .attr('font-family', FONT_SANS)
+          .attr('font-size', `${barTextFontSize}px`).attr('font-weight', '600')
+          .text(`Buf ${buf}`);
+        gDbo.append('text')
+          .attr('x', xDbo(compStart + tC / 2))
+          .attr('y', dGpuY + barH / 2 + 4)
+          .attr('text-anchor', 'middle').attr('fill', '#fff')
+          .attr('font-family', FONT_SANS)
+          .attr('font-size', `${barTextFontSize}px`).attr('font-weight', '600')
+          .text(`Buf ${s % 2 === 0 ? 'B' : 'A'}`);
+      }
+    }
+
+    // Bracket: steady-state step time
+    const ssStart = slot;
+    const ssEnd   = 2 * slot;
+
+    gDbo.append('line').attr('x1', xDbo(ssStart)).attr('x2', xDbo(ssEnd))
+      .attr('y1', ssY).attr('y2', ssY)
+      .attr('stroke', TEXT).attr('opacity', 0.5).attr('stroke-width', 1.5);
+    // Tick marks
+    [ssStart, ssEnd].forEach(t => {
+      gDbo.append('line').attr('x1', xDbo(t)).attr('x2', xDbo(t))
+        .attr('y1', ssY - 4).attr('y2', ssY + 4)
+        .attr('stroke', TEXT).attr('opacity', 0.5).attr('stroke-width', 1.5);
+    });
+    gDbo.append('text').attr('x', xDbo((ssStart + ssEnd) / 2)).attr('y', ssEqY)
+      .attr('text-anchor', 'middle').attr('fill', TEXT)
+      .attr('font-family', FONT_MONO)
+      .attr('font-size', `${eqFontSize}px`).attr('font-weight', '500')
+      .text(tight ? 't_step = max(comm, compute)' : 't_step = max(t_comm, t_compute)');
+
+    // Savings annotation
+    const savingsEnd = xDbo(steps * (tD + tC + tB));
+    const dboEnd     = xDbo(steps * slot);
+    if (savingsEnd > dboEnd + 28) {
+      gDbo.append('rect')
+        .attr('x', dboEnd + 2).attr('y', dGpuY)
+        .attr('width', savingsEnd - dboEnd - 2).attr('height', 2 * barH + rowGap)
+        .attr('fill', COMPUTE).attr('opacity', 0.08).attr('rx', 3)
+        .attr('stroke', COMPUTE).attr('stroke-width', 1).attr('stroke-dasharray', '3 2');
+      if (showSavedText) {
+        gDbo.append('text')
+          .attr('x', (dboEnd + savingsEnd) / 2).attr('y', dGpuY + barH + rowGap / 2 + 4)
+          .attr('text-anchor', 'middle').attr('fill', COMPUTE)
+          .attr('font-family', FONT_SANS)
+          .attr('font-size', `${tight ? 11 : 12}px`).attr('font-weight', '600')
+          .text('saved');
+      }
+    }
+  };
+
+  // Initial draw
+  draw();
+
+  // Watch for size changes
+  const ro = new ResizeObserver(draw);
+  ro.observe(container);
+}
+
+initDBOTimeline();
+</script>
+
+<style>
+  .dbo-timeline-wrap {
+    position: relative;
+    width: 100%;
+    height: clamp(300px, 36vw, 360px);
+    min-height: 300px;
+    margin-bottom: 0.35rem;
+  }
+
+  @media (max-width: 980px) {
+    .dbo-timeline-wrap {
+      height: 332px;
+    }
+  }
+
+  @media (max-width: 760px) {
+    .dbo-timeline-wrap {
+      height: 360px;
+    }
+  }
+  
+  /* Remove borders from the internal card to match the cleaner style */
+  .viz-card {
+    border: none;
+    background: transparent;
+  }
+
+  /* Remove border/background from the canvas itself */
+  #dboTimeline.viz-canvas {
+    border: none;
+    background: transparent;
+  }
+
+  .dbo-legend {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem 1.25rem;
+    margin: 0.15rem 0 0.75rem;
+  }
+
+  @media (max-width: 760px) {
+    .dbo-legend {
+      grid-template-columns: 1fr;
+      gap: 0.35rem;
+    }
+  }
+
+  .viz-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.74rem;
+    line-height: 1.35;
+    color: var(--muted);
+  }
+
+  .viz-legend-swatch {
+    width: 11px;
+    height: 11px;
+    border-radius: 2px;
+    display: inline-block;
+  }
+
+  .viz-card-caption {
+    font-size: 0.79rem;
+    color: var(--muted);
+    text-align: left;
+    margin-top: 0.65rem;
+    line-height: 1.62;
+    max-width: 72ch;
+  }
+
+  .viz-card-caption b {
+    color: var(--fg);
+    font-weight: 600;
+  }
+</style>

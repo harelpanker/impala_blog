@@ -1,0 +1,570 @@
+---
+---
+
+<figure id="eplb-figure" class="viz-widget l-body-outset">
+  <div class="viz-widget-header">
+    <h3 class="viz-widget-title">Expert Parallel Load Balancing (EPLB)</h3>
+    <span class="viz-kpi" id="eplbKpi">&gamma; = —</span>
+  </div>
+  <div class="viz-widget-body">
+    <div class="viz-controls">
+      <div class="viz-ctrl">
+        <div class="viz-ctrl-row">
+          <span class="viz-ctrl-label">Routing Skew (&alpha;)</span>
+          <span class="viz-ctrl-value" id="eplbSkewVal">1.4</span>
+        </div>
+        <p class="viz-ctrl-hint">Higher &alpha; = more imbalanced routing. Real workloads typically fall in 1.2–1.8.</p>
+        <input id="eplbSkew" type="range" min="1.0" max="2.5" step="0.05" value="1.4" />
+      </div>
+
+      <div class="viz-ctrl">
+        <div class="viz-ctrl-row">
+          <span class="viz-ctrl-label">Redundant Experts</span>
+          <span class="viz-ctrl-value" id="eplbRedundantVal">0</span>
+        </div>
+        <p class="viz-ctrl-hint">Extra physical expert copies for load balancing. Each costs ~2.4 GB HBM (DeepSeek-V3).</p>
+        <input id="eplbRedundant" type="range" min="0" max="64" step="1" value="0" />
+      </div>
+
+      <div class="viz-ctrl">
+        <div class="viz-ctrl-row">
+          <span class="viz-ctrl-label">EP Ranks (GPUs)</span>
+          <span class="viz-ctrl-value" id="eplbRanksVal">8</span>
+        </div>
+        <p class="viz-ctrl-hint">Number of GPUs in the expert-parallel group.</p>
+        <input id="eplbRanks" type="range" min="4" max="32" step="4" value="8" />
+      </div>
+    </div>
+
+    <!-- Status bar showing gamma improvement -->
+    <div class="viz-status-bar" id="eplbStatus">
+      <span class="viz-status-content">Adjust controls to explore load balancing</span>
+    </div>
+
+    <!-- Load per GPU bar chart -->
+    <div class="viz-card" style="margin-top: 16px;">
+      <div class="viz-card-header">
+        <span class="viz-card-title">Load per GPU</span>
+        <span class="viz-card-title" id="eplbMaxLabel" style="color: var(--combine);">—</span>
+      </div>
+      <div class="viz-card-body">
+        <div class="eplb-bars-wrap">
+          <svg id="eplbBars" class="viz-canvas" aria-label="Load per GPU bar chart" role="img"></svg>
+        </div>
+        <div class="viz-legend" style="margin-top: 8px;">
+          <span class="viz-legend-item"><span class="viz-legend-swatch" style="background: var(--compute);"></span> Balanced load</span>
+          <span class="viz-legend-item"><span class="viz-legend-swatch" style="background: var(--combine);"></span> Max-load GPU (straggler)</span>
+          <span class="viz-legend-item"><span class="viz-legend-swatch" style="background: var(--muted-2); height: 1px; border-top: 2px dashed var(--muted-2);"></span> Mean load</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Expert replication map -->
+    <div class="viz-card" style="margin-top: 16px;">
+      <div class="viz-card-header">
+        <span class="viz-card-title">Expert Replication Map</span>
+        <span class="viz-card-title" id="eplbReplicatedCount">—</span>
+      </div>
+      <div class="viz-card-body">
+        <div class="eplb-map-wrap">
+          <svg id="eplbMap" class="viz-canvas" aria-label="Expert replication map" role="img"></svg>
+        </div>
+        <p class="viz-card-caption">
+          Each cell is a logical expert. Size encodes token load; badge shows replica count.
+          Hot experts (replicated) are highlighted. EPLB spreads their load across multiple GPUs.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <figcaption>
+    <strong>&gamma; = max<sub>r</sub> / mean<sub>r</sub></strong> — the straggler factor from Section 3.
+    EPLB replicates popular experts so that token load is spread evenly across GPUs,
+    reducing &gamma; toward 1.0 and directly cutting <em>t</em><sub>compute</sub>.
+  </figcaption>
+</figure>
+
+<script>
+import katex from 'katex';
+// @ts-nocheck
+function initEPLB() {
+  const d3 = window.d3;
+  if (!d3) { requestAnimationFrame(initEPLB); return; }
+
+  const barsSvg = document.getElementById('eplbBars');
+  const mapSvg = document.getElementById('eplbMap');
+  if (!barsSvg || !mapSvg) return;
+
+  const skewSlider = /** @type {HTMLInputElement} */ (document.getElementById('eplbSkew'));
+  const redundantSlider = /** @type {HTMLInputElement} */ (document.getElementById('eplbRedundant'));
+  const ranksSlider = /** @type {HTMLInputElement} */ (document.getElementById('eplbRanks'));
+  const skewValEl = document.getElementById('eplbSkewVal');
+  const redundantValEl = document.getElementById('eplbRedundantVal');
+  const ranksValEl = document.getElementById('eplbRanksVal');
+  const kpiEl = document.getElementById('eplbKpi');
+  const statusEl = document.getElementById('eplbStatus');
+  const maxLabelEl = document.getElementById('eplbMaxLabel');
+  const replicatedCountEl = document.getElementById('eplbReplicatedCount');
+
+  // --- Theme colors ---
+  const css = getComputedStyle(document.documentElement);
+  const COMPUTE = css.getPropertyValue('--compute').trim() || '#059669';
+  const COMBINE = css.getPropertyValue('--combine').trim() || '#dc2626';
+  const ACCENT = css.getPropertyValue('--accent').trim() || '#c2410c';
+  const MUTED = css.getPropertyValue('--muted').trim() || 'rgba(0,0,0,0.6)';
+  const MUTED2 = css.getPropertyValue('--muted-2').trim() || 'rgba(0,0,0,0.4)';
+  const FG = css.getPropertyValue('--fg').trim() || 'rgba(0,0,0,0.8)';
+  const BORDER = css.getPropertyValue('--border').trim() || 'rgba(0,0,0,0.1)';
+  const FONT_MONO = css.getPropertyValue('--font-mono').trim() || 'monospace';
+  const FONT_BODY = css.getPropertyValue('--font-body').trim() || 'sans-serif';
+  const GAMMA_HTML = katex.renderToString(String.raw`\gamma`, { throwOnError: false, displayMode: false });
+  const gammaMath = `<span class="eplb-gamma-math" aria-label="gamma">${GAMMA_HTML}</span>`;
+
+  const NUM_LOGICAL_EXPERTS = 64; // Scaled-down for visualization (real V3 has 256)
+
+  // =========================================================================
+  // EPLB Algorithms (JS ports from vllm/distributed/eplb/policy/default.py)
+  // =========================================================================
+
+  /** Generate Zipf-distributed token loads for experts */
+  function generateSkewedLoad(numExperts, alpha, seed) {
+    // Zipf: weight_i proportional to 1 / rank^alpha
+    const weights = [];
+    // Use a seeded simple RNG for reproducibility across redraws
+    let s = seed || 42;
+    const rand = () => { s = (s * 1664525 + 1013904223) & 0x7fffffff; return s / 0x7fffffff; };
+
+    // Create Zipf base weights
+    const ranks = Array.from({ length: numExperts }, (_, i) => i);
+    // Shuffle ranks to simulate random expert popularity
+    for (let i = ranks.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      [ranks[i], ranks[j]] = [ranks[j], ranks[i]];
+    }
+    for (let i = 0; i < numExperts; i++) {
+      const zipfRank = ranks[i] + 1; // 1-indexed
+      weights.push(1.0 / Math.pow(zipfRank, alpha));
+    }
+    // Normalize to a total of ~10000 tokens
+    const totalTarget = 10000;
+    const sum = weights.reduce((a, b) => a + b, 0);
+    return weights.map(w => Math.round((w / sum) * totalTarget));
+  }
+
+  /**
+   * Replicate experts: greedily assign redundant slots to the expert
+   * with the highest (weight / replicaCount).
+   * Mirrors Python: replicate_experts() in default.py
+   */
+  function replicateExperts(weights, numRedundant) {
+    const numLog = weights.length;
+    const logcnt = new Array(numLog).fill(1);
+    const phy2log = [...Array(numLog).keys()]; // Start with 1:1 mapping
+
+    for (let i = 0; i < numRedundant; i++) {
+      // Find expert with max (weight / count)
+      let bestIdx = 0;
+      let bestVal = -1;
+      for (let j = 0; j < numLog; j++) {
+        const val = weights[j] / logcnt[j];
+        if (val > bestVal) {
+          bestVal = val;
+          bestIdx = j;
+        }
+      }
+      phy2log.push(bestIdx);
+      logcnt[bestIdx] += 1;
+    }
+    return { phy2log, logcnt };
+  }
+
+  /**
+   * Balanced bin-packing: pack physical experts to GPUs.
+   * Each GPU gets exactly (numPhysical / numGPUs) experts.
+   * Greedy: assign heaviest unassigned expert to lightest GPU.
+   * Mirrors Python: balanced_packing() in default.py
+   */
+  function balancedPacking(physicalWeights, numGPUs) {
+    const numPhy = physicalWeights.length;
+    const expertsPerGPU = Math.floor(numPhy / numGPUs);
+
+    // Sort by weight descending, keep track of original indices
+    const indexed = physicalWeights.map((w, i) => ({ w, i }));
+    indexed.sort((a, b) => b.w - a.w);
+
+    const gpuLoad = new Array(numGPUs).fill(0);
+    const gpuCount = new Array(numGPUs).fill(0);
+    const assignment = new Array(numPhy).fill(-1); // phy index -> gpu
+
+    for (const { w, i } of indexed) {
+      // Find lightest GPU that isn't full
+      let bestGPU = -1;
+      let bestLoad = Infinity;
+      for (let g = 0; g < numGPUs; g++) {
+        if (gpuCount[g] < expertsPerGPU && gpuLoad[g] < bestLoad) {
+          bestLoad = gpuLoad[g];
+          bestGPU = g;
+        }
+      }
+      if (bestGPU === -1) break; // All GPUs full
+      assignment[i] = bestGPU;
+      gpuLoad[bestGPU] += w;
+      gpuCount[bestGPU] += 1;
+    }
+
+    return { assignment, gpuLoad };
+  }
+
+  /**
+   * Full EPLB pipeline: generate loads, replicate, pack, compute gamma.
+   */
+  function runEPLB(alpha, numRedundant, numGPUs) {
+    const weights = generateSkewedLoad(NUM_LOGICAL_EXPERTS, alpha, 42);
+
+    // Replicate experts
+    const { phy2log, logcnt } = replicateExperts(weights, numRedundant);
+
+    // Compute effective per-physical-expert weight
+    const physicalWeights = phy2log.map(logIdx => weights[logIdx] / logcnt[logIdx]);
+
+    // Pack to GPUs
+    const { assignment, gpuLoad } = balancedPacking(physicalWeights, numGPUs);
+
+    // Also compute baseline gamma (no EPLB)
+    const baselinePhyWeights = weights.slice(); // 1:1 mapping
+    const { gpuLoad: baselineGpuLoad } = balancedPacking(baselinePhyWeights, numGPUs);
+    const baselineMean = baselineGpuLoad.reduce((a, b) => a + b, 0) / numGPUs;
+    const baselineMax = Math.max(...baselineGpuLoad);
+    const baselineGamma = baselineMean > 0 ? baselineMax / baselineMean : 1;
+
+    // Compute gamma
+    const mean = gpuLoad.reduce((a, b) => a + b, 0) / numGPUs;
+    const max = Math.max(...gpuLoad);
+    const gamma = mean > 0 ? max / mean : 1;
+    const maxGPU = gpuLoad.indexOf(max);
+
+    // Build per-GPU expert lists
+    const gpuExperts = Array.from({ length: numGPUs }, () => []);
+    for (let p = 0; p < phy2log.length; p++) {
+      const gpu = assignment[p];
+      if (gpu >= 0) {
+        gpuExperts[gpu].push({
+          logicalId: phy2log[p],
+          weight: physicalWeights[p],
+          isRedundant: p >= NUM_LOGICAL_EXPERTS, // physical indices beyond logical count are redundant
+        });
+      }
+    }
+
+    return {
+      weights, logcnt, gpuLoad, gpuExperts, gamma, mean, max, maxGPU,
+      baselineGamma, baselineGpuLoad, numGPUs,
+    };
+  }
+
+  // =========================================================================
+  // Drawing
+  // =========================================================================
+
+  function draw() {
+    const alpha = parseFloat(skewSlider.value);
+    const numRedundant = parseInt(redundantSlider.value);
+    const numGPUs = parseInt(ranksSlider.value);
+    const isMobile = window.matchMedia('(max-width: 700px)').matches;
+
+    // Update display values
+    skewValEl.textContent = alpha.toFixed(2);
+    redundantValEl.textContent = String(numRedundant);
+    ranksValEl.textContent = String(numGPUs);
+
+    const result = runEPLB(alpha, numRedundant, numGPUs);
+    const { logcnt, gamma, max, maxGPU, baselineGamma } = result;
+
+    // Update KPIs
+    kpiEl.textContent = `\u03B3 = ${gamma.toFixed(3)}`;
+    kpiEl.style.color = gamma > 1.15 ? COMBINE : COMPUTE;
+
+    const improvement = baselineGamma > 1 ? ((1 - (gamma - 1) / (baselineGamma - 1)) * 100) : 0;
+    const statusContent = statusEl.querySelector('.viz-status-content');
+    if (numRedundant > 0) {
+      statusContent.innerHTML = isMobile
+        ? `${gammaMath} ${baselineGamma.toFixed(3)} \u2192 <strong style="color:${COMPUTE}">${gamma.toFixed(3)}</strong>` +
+          (improvement > 0 ? ` &middot; <strong>${improvement.toFixed(0)}%</strong> less imbalance` : '') +
+          ` &middot; ${numRedundant} redundant`
+        : `${gammaMath} reduced from <strong style="color:${COMBINE}">${baselineGamma.toFixed(3)}</strong> ` +
+          `to <strong style="color:${COMPUTE}">${gamma.toFixed(3)}</strong>` +
+          (improvement > 0 ? ` &mdash; <strong>${improvement.toFixed(0)}%</strong> imbalance reduction` : '') +
+          ` &mdash; ${numRedundant} redundant expert${numRedundant !== 1 ? 's' : ''} ` +
+          `(\u2248${(numRedundant * 2.4).toFixed(1)} GB extra HBM)`;
+    } else {
+      statusContent.innerHTML = isMobile
+        ? `Baseline: <strong>${gammaMath} = ${gamma.toFixed(3)}</strong> &middot; add <strong>Redundant Experts</strong>`
+        : `Baseline: <strong>${gammaMath} = ${gamma.toFixed(3)}</strong> &mdash; ` +
+          `drag <strong>Redundant Experts</strong> to see EPLB in action`;
+    }
+
+    maxLabelEl.textContent = `max: GPU ${maxGPU} (${max.toFixed(0)} tokens)`;
+
+    // Count replicated experts
+    const replicatedExperts = logcnt.filter(c => c > 1).length;
+    replicatedCountEl.textContent = replicatedExperts > 0
+      ? `${replicatedExperts} expert${replicatedExperts !== 1 ? 's' : ''} replicated`
+      : 'no replication';
+
+    drawBars(result);
+    drawMap(result);
+  }
+
+  function drawBars(result) {
+    const { gpuLoad, baselineGpuLoad, mean, max, maxGPU, numGPUs } = result;
+
+    const container = barsSvg.parentElement;
+    const W = container.clientWidth || 600;
+    const compact = W < 560;
+    const barH = compact ? 20 : 22;
+    const gap = compact ? 5 : 6;
+    const H = numGPUs * (barH + gap) + (compact ? 28 : 30);
+
+    const svg = d3.select(barsSvg);
+    svg.selectAll('*').remove();
+    svg.attr('width', W).attr('height', H).attr('viewBox', `0 0 ${W} ${H}`);
+
+    const margin = compact
+      ? { top: 8, right: 56, bottom: 18, left: 52 }
+      : { top: 8, right: 70, bottom: 20, left: 56 };
+    const iW = W - margin.left - margin.right;
+    const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+    const xMax = Math.max(...gpuLoad, ...baselineGpuLoad) * 1.1;
+    const x = d3.scaleLinear().domain([0, xMax]).range([0, iW]);
+
+    // Draw bars
+    for (let i = 0; i < numGPUs; i++) {
+      const y = i * (barH + gap);
+      const isMax = i === maxGPU;
+      const barColor = isMax ? COMBINE : COMPUTE;
+      const load = gpuLoad[i];
+
+      // Background track
+      g.append('rect')
+        .attr('x', 0).attr('y', y)
+        .attr('width', iW).attr('height', barH)
+        .attr('fill', BORDER).attr('rx', 3);
+
+      // Actual bar
+      g.append('rect')
+        .attr('x', 0).attr('y', y)
+        .attr('width', x(load)).attr('height', barH)
+        .attr('fill', barColor)
+        .attr('opacity', isMax ? 1.0 : 0.75)
+        .attr('rx', 3);
+
+      // Baseline bar (ghost)
+      if (result.baselineGpuLoad && parseInt(document.getElementById('eplbRedundant').value) > 0) {
+        const baseLoad = baselineGpuLoad[i] || 0;
+        g.append('rect')
+          .attr('x', x(baseLoad) - 2).attr('y', y)
+          .attr('width', 2).attr('height', barH)
+          .attr('fill', MUTED2)
+          .attr('opacity', 0.6);
+      }
+
+      // GPU label
+      g.append('text')
+        .attr('x', -8).attr('y', y + barH / 2 + 4)
+        .attr('text-anchor', 'end')
+        .attr('fill', isMax ? COMBINE : FG)
+        .attr('font-family', FONT_MONO)
+        .attr('font-size', compact ? '10px' : '11px')
+        .attr('font-weight', isMax ? '700' : '400')
+        .text(`GPU ${i}`);
+
+      // Value label
+      g.append('text')
+        .attr('x', x(load) + 6).attr('y', y + barH / 2 + 4)
+        .attr('text-anchor', 'start')
+        .attr('fill', isMax ? COMBINE : MUTED)
+        .attr('font-family', FONT_MONO)
+        .attr('font-size', compact ? '9px' : '10px')
+        .text(`${load.toFixed(0)}`);
+    }
+
+    // Mean line
+    g.append('line')
+      .attr('x1', x(mean)).attr('x2', x(mean))
+      .attr('y1', -4).attr('y2', numGPUs * (barH + gap) - gap + 4)
+      .attr('stroke', MUTED2)
+      .attr('stroke-width', 1.5)
+      .attr('stroke-dasharray', '4 3');
+
+    // Mean label
+    g.append('text')
+      .attr('x', x(mean)).attr('y', numGPUs * (barH + gap) + (compact ? 12 : 14))
+      .attr('text-anchor', 'middle')
+      .attr('fill', MUTED2)
+      .attr('font-family', FONT_MONO)
+      .attr('font-size', compact ? '9px' : '10px')
+      .text(`mean: ${mean.toFixed(0)}`);
+  }
+
+  function drawMap(result) {
+    const { weights, logcnt } = result;
+
+    const container = mapSvg.parentElement;
+    const W = container.clientWidth || 600;
+    const compact = W < 640;
+
+    // Choose column count from available width so the map uses the full row.
+    const cellPad = compact ? 4 : 5;
+    const margin = compact
+      ? { top: 8, right: 12, bottom: 8, left: 12 }
+      : { top: 8, right: 16, bottom: 8, left: 16 };
+    const availW = W - margin.left - margin.right;
+    const targetCell = compact ? 24 : 34;
+    const minCols = compact ? 7 : 12;
+    const maxCols = compact ? 10 : 32;
+    const cols = Math.min(
+      NUM_LOGICAL_EXPERTS,
+      Math.max(
+        minCols,
+        Math.min(maxCols, Math.floor((availW + cellPad) / (targetCell + cellPad)))
+      )
+    );
+    const rows = Math.ceil(NUM_LOGICAL_EXPERTS / cols);
+    const minCell = compact ? 16 : 22;
+    const cellSize = Math.max(minCell, Math.floor((availW - (cols - 1) * cellPad) / cols));
+    const H = margin.top + rows * (cellSize + cellPad) + margin.bottom + 4;
+
+    const svg = d3.select(mapSvg);
+    svg.selectAll('*').remove();
+    svg.attr('width', W).attr('height', H).attr('viewBox', `0 0 ${W} ${H}`);
+    const usedW = cols * cellSize + (cols - 1) * cellPad;
+    const xOffset = Math.max(0, (availW - usedW) / 2);
+    const g = svg.append('g').attr('transform', `translate(${margin.left + xOffset},${margin.top})`);
+
+    // Normalize weights for sizing
+    const maxWeight = Math.max(...weights);
+    const minWeight = Math.min(...weights);
+
+    // Color scale: more load = more saturated
+    const colorScale = d3.scaleLinear()
+      .domain([minWeight, maxWeight])
+      .range([0.2, 1.0]);
+
+    for (let i = 0; i < NUM_LOGICAL_EXPERTS; i++) {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const cx = col * (cellSize + cellPad) + cellSize / 2;
+      const cy = row * (cellSize + cellPad) + cellSize / 2;
+      const isReplicated = logcnt[i] > 1;
+      const intensity = colorScale(weights[i]);
+
+      // Cell background
+      const r = cellSize / 2 - 1;
+      const innerR = Math.max(2.5, r * (0.48 + 0.52 * intensity));
+
+      // Outer cell (border)
+      g.append('rect')
+        .attr('x', cx - cellSize / 2).attr('y', cy - cellSize / 2)
+        .attr('width', cellSize).attr('height', cellSize)
+        .attr('rx', 4)
+        .attr('fill', 'none')
+        .attr('stroke', isReplicated ? ACCENT : BORDER)
+        .attr('stroke-width', isReplicated ? 2 : 1);
+
+      // Inner circle sized by load
+      g.append('circle')
+        .attr('cx', cx).attr('cy', cy)
+        .attr('r', innerR)
+        .attr('fill', isReplicated ? ACCENT : COMPUTE)
+        .attr('opacity', isReplicated ? 0.85 : intensity * 0.6 + 0.15);
+
+      // Replica count badge
+      if (isReplicated) {
+        const badgeR = cellSize >= 24 ? 6 : 5;
+        const bx = cx + cellSize / 2 - badgeR + 2;
+        const by = cy - cellSize / 2 + badgeR - 2;
+        g.append('circle')
+          .attr('cx', bx).attr('cy', by)
+          .attr('r', badgeR)
+          .attr('fill', ACCENT);
+        g.append('text')
+          .attr('x', bx).attr('y', by + 3.5)
+          .attr('text-anchor', 'middle')
+          .attr('fill', '#fff')
+          .attr('font-family', FONT_MONO)
+          .attr('font-size', cellSize >= 24 ? '8px' : '7px')
+          .attr('font-weight', '700')
+          .text(`${logcnt[i]}`);
+      }
+
+      // Expert ID (small, only if cell is big enough)
+      if (cellSize >= 20) {
+        g.append('text')
+          .attr('x', cx).attr('y', cy + (isReplicated ? 1 : 3.5))
+          .attr('text-anchor', 'middle')
+          .attr('fill', isReplicated ? '#fff' : MUTED2)
+          .attr('font-family', FONT_MONO)
+          .attr('font-size', cellSize >= 30 ? '9px' : '8px')
+          .attr('font-weight', '500')
+          .text(i);
+      }
+    }
+  }
+
+  // --- Event listeners ---
+  [skewSlider, redundantSlider, ranksSlider].forEach(el => {
+    el.addEventListener('input', draw);
+  });
+
+  // --- Responsive ---
+  const barsContainer = barsSvg.parentElement;
+  const mapContainer = mapSvg.parentElement;
+  const ro = new ResizeObserver(() => draw());
+  if (barsContainer) ro.observe(barsContainer);
+  if (mapContainer) ro.observe(mapContainer);
+
+  // Initial draw
+  draw();
+}
+
+initEPLB();
+</script>
+
+<style>
+  #eplb-figure .eplb-gamma-math {
+    display: inline-flex;
+    align-items: center;
+    color: var(--dbo);
+    vertical-align: -0.06em;
+    margin-right: 2px;
+  }
+
+  #eplb-figure .eplb-gamma-math .katex {
+    font-size: 0.98em;
+    color: inherit;
+  }
+
+  .eplb-bars-wrap {
+    width: 100%;
+    min-height: 200px;
+  }
+
+  .eplb-map-wrap {
+    width: 100%;
+    min-height: 80px;
+  }
+
+  #eplbBars.viz-canvas,
+  #eplbMap.viz-canvas {
+    position: relative;
+    border: none;
+    background: transparent;
+  }
+
+  @media (max-width: 700px) {
+    .eplb-bars-wrap {
+      min-height: 186px;
+    }
+  }
+</style>
