@@ -1,0 +1,34 @@
+---
+
+---
+
+<!doctype html>
+<html lang='en'>
+	<head>
+		<meta charset='UTF-8' />
+		<title>Redirecting...</title>
+		<script is:inline>
+			const base = '/impala_blog';
+			const path = window.location.pathname;
+
+			// If we're at the root of the site (hubspot domain root) or wrong base
+			if (!path.startsWith(base)) {
+				window.location.replace(base + path);
+			} else {
+				// If the URL ends with .html, strip it and redirect to the directory version
+				if (path.endsWith('.html')) {
+					window.location.replace(path.slice(0, -5) + '/');
+				} else if (!path.endsWith('/')) {
+					// Ensure trailing slash for directory format consistency
+					window.location.replace(path + '/');
+				}
+			}
+		</script>
+	</head>
+	<body>
+		<p>Redirecting to <a id='link' href='/impala_blog/'>the correct page</a>...</p>
+		<script is:inline>
+			document.getElementById('link').href = window.location.pathname;
+		</script>
+	</body>
+</html>

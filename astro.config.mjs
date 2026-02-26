@@ -8,4 +8,7 @@ export default defineConfig({
 	site: 'https://harelpanker.github.io',
 	base: '/impala_blog',
 	integrations: [mdx()],
+	build: {
+		format: 'directory',
+	},
 });

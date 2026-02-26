@@ -1,543 +1,573 @@
 ---
+
 ---
 
-<figure id="dbo-figure" class="viz-widget">
-  <div class="viz-widget-header">
-    <h3 class="viz-widget-title">Interactive Performance Model</h3>
-    <span class="viz-kpi" id="kpiLine">—</span>
-  </div>
-  <div class="viz-widget-body">
-    <div class="viz-controls">
-      <div class="viz-ctrl">
-        <div class="viz-ctrl-header">
-          <span class="viz-ctrl-label">Batch tokens</span>
-          <span class="viz-ctrl-value" id="tokensVal">—</span>
-        </div>
-        <input id="tokens" type="range" min="2" max="20" step="1" />
-      </div>
+<figure id='dbo-figure' class='viz-widget'>
+	<div class='viz-widget-header'>
+		<h3 class='viz-widget-title'>Interactive Performance Model</h3>
+		<span class='viz-kpi' id='kpiLine'>—</span>
+	</div>
+	<div class='viz-widget-body'>
+		<div class='viz-controls'>
+			<div class='viz-ctrl'>
+				<div class='viz-ctrl-header'>
+					<span class='viz-ctrl-label'>Batch tokens</span>
+					<span class='viz-ctrl-value' id='tokensVal'>—</span>
+				</div>
+				<input id='tokens' type='range' min='2' max='20' step='1' />
+			</div>
 
-      <div class="viz-ctrl">
-        <div class="viz-ctrl-header">
-          <span class="viz-ctrl-label">EP ranks</span>
-          <span class="viz-ctrl-value" id="epVal">—</span>
-        </div>
-        <input id="ep" type="range" min="2" max="64" step="2" />
-      </div>
+			<div class='viz-ctrl'>
+				<div class='viz-ctrl-header'>
+					<span class='viz-ctrl-label'>EP ranks</span>
+					<span class='viz-ctrl-value' id='epVal'>—</span>
+				</div>
+				<input id='ep' type='range' min='2' max='64' step='2' />
+			</div>
 
-      <div class="viz-ctrl">
-        <div class="viz-ctrl-header">
-          <span class="viz-ctrl-label">Latency</span>
-          <span class="viz-ctrl-value" id="latVal">—</span>
-        </div>
-        <input id="lat" type="range" min="2" max="80" step="1" />
-      </div>
+			<div class='viz-ctrl'>
+				<div class='viz-ctrl-header'>
+					<span class='viz-ctrl-label'>Latency</span>
+					<span class='viz-ctrl-value' id='latVal'>—</span>
+				</div>
+				<input id='lat' type='range' min='2' max='80' step='1' />
+			</div>
 
-      <div class="viz-ctrl">
-        <div class="viz-ctrl-header">
-          <span class="viz-ctrl-label">Bandwidth</span>
-          <span class="viz-ctrl-value" id="bwVal">—</span>
-        </div>
-        <input id="bw" type="range" min="5" max="120" step="1" />
-      </div>
+			<div class='viz-ctrl'>
+				<div class='viz-ctrl-header'>
+					<span class='viz-ctrl-label'>Bandwidth</span>
+					<span class='viz-ctrl-value' id='bwVal'>—</span>
+				</div>
+				<input id='bw' type='range' min='5' max='120' step='1' />
+			</div>
 
-      <div class="viz-ctrl">
-        <div class="viz-ctrl-header">
-          <span class="viz-ctrl-label">Compute/tok</span>
-          <span class="viz-ctrl-value" id="ctokVal">—</span>
-        </div>
-        <input id="ctok" type="range" min="0.05" max="2.0" step="0.01" />
-      </div>
+			<div class='viz-ctrl'>
+				<div class='viz-ctrl-header'>
+					<span class='viz-ctrl-label'>Compute/tok</span>
+					<span class='viz-ctrl-value' id='ctokVal'>—</span>
+				</div>
+				<input id='ctok' type='range' min='0.05' max='2.0' step='0.01' />
+			</div>
 
-      <div class="viz-ctrl">
-        <div class="viz-ctrl-header">
-          <span class="viz-ctrl-label">Expert skew</span>
-          <span class="viz-ctrl-value" id="skewVal">—</span>
-        </div>
-        <input id="skew" type="range" min="0" max="1" step="0.01" />
-      </div>
-    </div>
+			<div class='viz-ctrl'>
+				<div class='viz-ctrl-header'>
+					<span class='viz-ctrl-label'>Expert skew</span>
+					<span class='viz-ctrl-value' id='skewVal'>—</span>
+				</div>
+				<input id='skew' type='range' min='0' max='1' step='0.01' />
+			</div>
+		</div>
 
-    <div class="viz-toolbar">
-      <div class="viz-controls-primary">
-        <div class="viz-group-container">
-          <span class="viz-ctrl-hint">Click to toggle:</span>
-          <div class="viz-group">
-            <label class="viz-segment" data-tooltip="Dual-Batch Overlap (DBO): Hides network latency by computing one batch while receiving the next.">
-              <input type="checkbox" id="dbo" checked />
-              <span>DBO</span>
-            </label>
-            <label class="viz-segment" data-tooltip="Micro-batching: Splits work into chunks to enable pipelining (simultaneous compute & comm).">
-              <input type="checkbox" id="split" checked />
-              <span>Micro‑batch</span>
-            </label>
-            <label class="viz-segment" data-tooltip="Animation: Play/pause the timeline visualization.">
-              <input type="checkbox" id="animate" checked />
-              <span>Animate</span>
-            </label>
-          </div>
-        </div>
-        <div class="viz-actions">
-          <button id="reset" class="viz-btn viz-btn-icon" title="Reset to defaults">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
-          </button>
-          <div class="viz-presets">
-            <span class="viz-presets-label">Presets:</span>
-            <button id="snapDecode" class="viz-btn viz-btn-sm">Decode</button>
-            <button id="snapPrefill" class="viz-btn viz-btn-sm">Prefill</button>
-          </div>
-        </div>
-      </div>
-      
-      <div class="viz-status-bar">
-        <div class="viz-status-content" id="summaryPill">—</div>
-      </div>
-    </div>
+		<div class='viz-toolbar'>
+			<div class='viz-controls-primary'>
+				<div class='viz-group-container'>
+					<span class='viz-ctrl-hint'>Click to toggle:</span>
+					<div class='viz-group'>
+						<label
+							class='viz-segment'
+							data-tooltip='Dual-Batch Overlap (DBO): Hides network latency by computing one batch while receiving the next.'>
+							<input type='checkbox' id='dbo' checked />
+							<span>DBO</span>
+						</label>
+						<label
+							class='viz-segment'
+							data-tooltip='Micro-batching: Splits work into chunks to enable pipelining (simultaneous compute & comm).'>
+							<input type='checkbox' id='split' checked />
+							<span>Micro‑batch</span>
+						</label>
+						<label class='viz-segment' data-tooltip='Animation: Play/pause the timeline visualization.'>
+							<input type='checkbox' id='animate' checked />
+							<span>Animate</span>
+						</label>
+					</div>
+				</div>
+				<div class='viz-actions'>
+					<button id='reset' class='viz-btn viz-btn-icon' title='Reset to defaults'>
+						<svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'
+							><path d='M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8'></path><path d='M3 3v5h5'></path></svg
+						>
+					</button>
+					<div class='viz-presets'>
+						<span class='viz-presets-label'>Presets:</span>
+						<button id='snapDecode' class='viz-btn viz-btn-sm'>Decode</button>
+						<button id='snapPrefill' class='viz-btn viz-btn-sm'>Prefill</button>
+					</div>
+				</div>
+			</div>
 
-    <div class="viz-grid">
-      <div class="viz-card">
-        <div class="viz-card-header">
-          <h4 class="viz-card-title">Execution Timeline</h4>
-          <span class="viz-kpi" id="timelineKpi">—</span>
-        </div>
-        <div class="viz-card-body">
-          <div class="viz-canvas-wrap viz-canvas-wrap-timeline">
-            <svg id="timeline" class="viz-canvas" aria-label="Dispatch/compute/combine timeline" role="img"></svg>
-            <div id="timelineTip" class="viz-tip" aria-hidden="true"></div>
-          </div>
-          <div class="viz-legend" aria-label="Timeline legend">
-            <span class="viz-legend-item"><span class="viz-legend-swatch" style="background: var(--comm);"></span> dispatch</span>
-            <span class="viz-legend-item"><span class="viz-legend-swatch" style="background: var(--compute);"></span> compute</span>
-            <span class="viz-legend-item"><span class="viz-legend-swatch" style="background: var(--combine);"></span> combine</span>
-          </div>
-        </div>
-      </div>
+			<div class='viz-status-bar'>
+				<div class='viz-status-content' id='summaryPill'>—</div>
+			</div>
+		</div>
 
-      <div class="viz-card">
-        <div class="viz-card-header">
-          <h4 class="viz-card-title">Step Time vs Batch Size</h4>
-          <span class="viz-kpi" id="curveKpi">—</span>
-        </div>
-        <div class="viz-card-body">
-          <div class="viz-canvas-wrap viz-canvas-wrap-curves">
-            <svg id="curves" class="viz-canvas" aria-label="Log-log step time curves" role="img"></svg>
-          </div>
-          <div class="viz-legend" aria-label="Curves legend">
-            <span class="viz-legend-item"><span class="viz-legend-swatch" style="background: var(--comm);"></span> comm (2×dispatch)</span>
-            <span class="viz-legend-item"><span class="viz-legend-swatch with-marker" style="background: var(--compute);"></span> compute</span>
-            <span class="viz-legend-item"><span class="viz-legend-swatch dashed" style="color: var(--no-overlap);"></span> no‑overlap</span>
-            <span class="viz-legend-item"><span class="viz-legend-swatch dotted" style="color: var(--dbo);"></span> DBO</span>
-          </div>
-        </div>
-      </div>
-    </div>
+		<div class='viz-grid'>
+			<div class='viz-card'>
+				<div class='viz-card-header'>
+					<h4 class='viz-card-title'>Execution Timeline</h4>
+					<span class='viz-kpi' id='timelineKpi'>—</span>
+				</div>
+				<div class='viz-card-body'>
+					<div class='viz-canvas-wrap viz-canvas-wrap-timeline'>
+						<svg id='timeline' class='viz-canvas' aria-label='Dispatch/compute/combine timeline' role='img'></svg>
+						<div id='timelineTip' class='viz-tip' aria-hidden='true'></div>
+					</div>
+					<div class='viz-legend' aria-label='Timeline legend'>
+						<span class='viz-legend-item'
+							><span class='viz-legend-swatch' style='background: var(--comm);'></span> dispatch</span
+						>
+						<span class='viz-legend-item'
+							><span class='viz-legend-swatch' style='background: var(--compute);'></span> compute</span
+						>
+						<span class='viz-legend-item'
+							><span class='viz-legend-swatch' style='background: var(--combine);'></span> combine</span
+						>
+					</div>
+				</div>
+			</div>
 
-    <details class="viz-details">
-      <summary>Show math</summary>
-      <div class="viz-details-content">
-        <p><b>Dispatch time:</b> <span id="eqDispatch"></span></p>
-        <p><b>Compute time:</b> <span id="eqCompute"></span></p>
-        <p><b>No‑overlap total:</b> <span id="eqNo"></span></p>
-        <p><b>DBO steady‑state:</b> <span id="eqDbo"></span></p>
-        <p class="viz-math-note">
-          The widget uses <b>effective</b> terms: <k-code>{'L_eff'}</k-code>, <k-code>{'BW_eff'}</k-code>, and <k-code>{'c_tok,eff'}</k-code>.
-          Effects like <k-code>VLLM_DBO_COMM_SMS</k-code> are folded into these sliders (not modeled as a separate <k-math>{String.raw`\rho`}</k-math> control).
-        </p>
-        <div class="viz-testbox" id="tests"></div>
-      </div>
-    </details>
-  </div>
-  <figcaption>
-    The <b>timeline</b> shows how a step is divided into dispatch, compute, and combine phases.
-    With <b>DBO</b>, communication of the next microbatch overlaps with compute of the current one.
-    The <b>curves</b> show how total step time changes across batch sizes; the dot shows the current slider position.
-  </figcaption>
+			<div class='viz-card'>
+				<div class='viz-card-header'>
+					<h4 class='viz-card-title'>Step Time vs Batch Size</h4>
+					<span class='viz-kpi' id='curveKpi'>—</span>
+				</div>
+				<div class='viz-card-body'>
+					<div class='viz-canvas-wrap viz-canvas-wrap-curves'>
+						<svg id='curves' class='viz-canvas' aria-label='Log-log step time curves' role='img'></svg>
+					</div>
+					<div class='viz-legend' aria-label='Curves legend'>
+						<span class='viz-legend-item'
+							><span class='viz-legend-swatch' style='background: var(--comm);'></span> comm (2×dispatch)</span
+						>
+						<span class='viz-legend-item'
+							><span class='viz-legend-swatch with-marker' style='background: var(--compute);'></span> compute</span
+						>
+						<span class='viz-legend-item'
+							><span class='viz-legend-swatch dashed' style='color: var(--no-overlap);'></span> no‑overlap</span
+						>
+						<span class='viz-legend-item'
+							><span class='viz-legend-swatch dotted' style='color: var(--dbo);'></span> DBO</span
+						>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<details class='viz-details'>
+			<summary>Show math</summary>
+			<div class='viz-details-content'>
+				<p><b>Dispatch time:</b> <span id='eqDispatch'></span></p>
+				<p><b>Compute time:</b> <span id='eqCompute'></span></p>
+				<p><b>No‑overlap total:</b> <span id='eqNo'></span></p>
+				<p><b>DBO steady‑state:</b> <span id='eqDbo'></span></p>
+				<p class='viz-math-note'>
+					The widget uses <b>effective</b> terms: <k-code>{'L_eff'}</k-code>, <k-code>{'BW_eff'}</k-code>, and <k-code
+						>{'c_tok,eff'}</k-code
+					>. Effects like <k-code>VLLM_DBO_COMM_SMS</k-code> are folded into these sliders (not modeled as a separate <k-math
+						>{String.raw`\rho`}</k-math
+					> control).
+				</p>
+				<div class='viz-testbox' id='tests'></div>
+			</div>
+		</details>
+	</div>
+	<figcaption>
+		The <b>timeline</b> shows how a step is divided into dispatch, compute, and combine phases. With <b>DBO</b>,
+		communication of the next microbatch overlaps with compute of the current one. The <b>curves</b> show how total step time
+		changes across batch sizes; the dot shows the current slider position.
+	</figcaption>
 </figure>
 
 <script>
-  import katex from 'katex';
-  // Expose KaTeX globally so the widget script can find it
-  // @ts-ignore
-  window.katex = katex;
+	import katex from 'katex';
+	// Expose KaTeX globally so the widget script can find it
+	// @ts-ignore
+	window.katex = katex;
 </script>
 
 <style>
-  /* Default to full screen (l-screen behavior) */
-  #dbo-figure {
-    grid-column: screen;
-  }
+	/* Default to full screen (l-screen behavior) */
+	#dbo-figure {
+		grid-column: screen;
+	}
 
-  /* On wide screens, restrict to page width */
-  @media (min-width: 1600px) {
-    #dbo-figure {
-      grid-column: page;
-    }
-  }
+	/* On wide screens, restrict to page width */
+	@media (min-width: 1600px) {
+		#dbo-figure {
+			grid-column: page;
+		}
+	}
 
-  #dbo-figure .viz-widget-header {
-    border-bottom: none;
-    padding-bottom: 11px;
-    margin-bottom: 2px;
-  }
+	#dbo-figure .viz-widget-header {
+		border-bottom: none;
+		padding-bottom: 11px;
+		margin-bottom: 2px;
+	}
 
-  #dbo-figure .viz-widget-title {
-    letter-spacing: 0.12em;
-  }
+	#dbo-figure .viz-widget-title {
+		letter-spacing: 0.12em;
+	}
 
-  #dbo-figure #kpiLine {
-    margin-left: auto;
-    max-width: min(60ch, 62%);
-    text-align: right;
-    font-size: 0.72rem;
-    color: var(--muted);
-    line-height: 1.35;
-  }
+	#dbo-figure #kpiLine {
+		margin-left: auto;
+		max-width: min(60ch, 62%);
+		text-align: right;
+		font-size: 0.72rem;
+		color: var(--muted);
+		line-height: 1.35;
+	}
 
-  #dbo-figure .viz-widget-body {
-    padding-top: 14px;
-  }
+	#dbo-figure .viz-widget-body {
+		padding-top: 14px;
+	}
 
-  /* Clean 3x2 control layout */
-  #dbo-figure .viz-controls {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px 12px;
-    margin-bottom: 12px;
-  }
+	/* Clean 3x2 control layout */
+	#dbo-figure .viz-controls {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 10px 12px;
+		margin-bottom: 12px;
+	}
 
-  #dbo-figure .viz-ctrl {
-    padding: 10px 11px 9px;
-    border-radius: 10px;
-    border: none;
-    background: linear-gradient(180deg, rgba(255, 252, 246, 0.92), rgba(255, 248, 239, 0.72));
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    min-height: 62px;
-  }
+	#dbo-figure .viz-ctrl {
+		padding: 10px 11px 9px;
+		border-radius: 10px;
+		border: none;
+		background: linear-gradient(180deg, rgba(255, 252, 246, 0.92), rgba(255, 248, 239, 0.72));
+		display: flex;
+		flex-direction: column;
+		justify-content: center;
+		min-height: 62px;
+	}
 
-  #dbo-figure .viz-ctrl-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: 12px;
-    margin-bottom: 5px;
-  }
+	#dbo-figure .viz-ctrl-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: baseline;
+		gap: 12px;
+		margin-bottom: 5px;
+	}
 
-  #dbo-figure .viz-ctrl-label {
-    font-size: 0.76rem;
-    font-weight: 600;
-    color: var(--fg);
-    white-space: nowrap;
-  }
+	#dbo-figure .viz-ctrl-label {
+		font-size: 0.76rem;
+		font-weight: 600;
+		color: var(--fg);
+		white-space: nowrap;
+	}
 
-  #dbo-figure .viz-ctrl-value {
-    font-family: var(--font-mono);
-    font-size: 0.69rem;
-    color: var(--muted-2);
-    white-space: nowrap;
-  }
+	#dbo-figure .viz-ctrl-value {
+		font-family: var(--font-mono);
+		font-size: 0.69rem;
+		color: var(--muted-2);
+		white-space: nowrap;
+	}
 
-  #dbo-figure .viz-ctrl input[type="range"] {
-    display: block;
-    width: 100%;
-    margin: 4px 0 0;
-    accent-color: var(--accent);
-    height: 4px;
-  }
+	#dbo-figure .viz-ctrl input[type='range'] {
+		display: block;
+		width: 100%;
+		margin: 4px 0 0;
+		accent-color: var(--accent);
+		height: 4px;
+	}
 
-  /* Toolbar hierarchy */
-  #dbo-figure .viz-toolbar {
-    margin-bottom: 14px;
-    padding: 10px 11px;
-    border: none;
-    border-radius: 10px;
-    background: rgba(255, 252, 246, 0.78);
-    gap: 9px;
-  }
+	/* Toolbar hierarchy */
+	#dbo-figure .viz-toolbar {
+		margin-bottom: 14px;
+		padding: 10px 11px;
+		border: none;
+		border-radius: 10px;
+		background: rgba(255, 252, 246, 0.78);
+		gap: 9px;
+	}
 
-  #dbo-figure .viz-controls-primary {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px 14px;
-    flex-wrap: wrap;
-  }
+	#dbo-figure .viz-controls-primary {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px 14px;
+		flex-wrap: wrap;
+	}
 
-  #dbo-figure .viz-group-container {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    flex-wrap: wrap;
-  }
+	#dbo-figure .viz-group-container {
+		display: flex;
+		align-items: center;
+		gap: 9px;
+		flex-wrap: wrap;
+	}
 
-  #dbo-figure .viz-ctrl-hint {
-    font-size: 0.66rem;
-    color: var(--muted-2);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-weight: 600;
-    margin-right: 2px;
-  }
+	#dbo-figure .viz-ctrl-hint {
+		font-size: 0.66rem;
+		color: var(--muted-2);
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		font-weight: 600;
+		margin-right: 2px;
+	}
 
-  #dbo-figure .viz-group {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-  }
+	#dbo-figure .viz-group {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		flex-wrap: wrap;
+	}
 
-  #dbo-figure .viz-segment {
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 6px 11px;
-    font-family: var(--font-body);
-    font-size: 0.74rem;
-    font-weight: 500;
-    color: var(--muted);
-    cursor: pointer;
-    border-radius: 7px;
-    border: none;
-    background: transparent;
-    transition: all 0.15s ease;
-    user-select: none;
-    gap: 6px;
-  }
+	#dbo-figure .viz-segment {
+		position: relative;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 6px 11px;
+		font-family: var(--font-body);
+		font-size: 0.74rem;
+		font-weight: 500;
+		color: var(--muted);
+		cursor: pointer;
+		border-radius: 7px;
+		border: none;
+		background: transparent;
+		transition: all 0.15s ease;
+		user-select: none;
+		gap: 6px;
+	}
 
-  #dbo-figure .viz-segment:hover {
-    color: var(--fg);
-    background: var(--surface-2);
-  }
+	#dbo-figure .viz-segment:hover {
+		color: var(--fg);
+		background: var(--surface-2);
+	}
 
-  #dbo-figure .viz-segment input {
-    display: none;
-  }
+	#dbo-figure .viz-segment input {
+		display: none;
+	}
 
-  #dbo-figure .viz-segment:has(input:checked) {
-    background: var(--surface-2);
-    color: var(--fg);
-    font-weight: 600;
-  }
+	#dbo-figure .viz-segment:has(input:checked) {
+		background: var(--surface-2);
+		color: var(--fg);
+		font-weight: 600;
+	}
 
-  #dbo-figure .viz-actions {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    margin-left: auto;
-  }
+	#dbo-figure .viz-actions {
+		display: flex;
+		align-items: center;
+		gap: 9px;
+		margin-left: auto;
+	}
 
-  #dbo-figure .viz-btn {
-    border: none;
-    background: var(--surface-2);
-  }
+	#dbo-figure .viz-btn {
+		border: none;
+		background: var(--surface-2);
+	}
 
-  #dbo-figure .viz-btn:hover {
-    background: #fffaf2;
-  }
+	#dbo-figure .viz-btn:hover {
+		background: #fffaf2;
+	}
 
-  #dbo-figure .viz-presets {
-    border-left: none;
-    padding-left: 10px;
-    gap: 7px;
-  }
+	#dbo-figure .viz-presets {
+		border-left: none;
+		padding-left: 10px;
+		gap: 7px;
+	}
 
-  #dbo-figure .viz-status-bar {
-    min-height: 34px;
-    padding: 6px 10px;
-    border: none;
-    border-radius: 8px;
-    background: rgba(255, 252, 246, 0.95);
-  }
+	#dbo-figure .viz-status-bar {
+		min-height: 34px;
+		padding: 6px 10px;
+		border: none;
+		border-radius: 8px;
+		background: rgba(255, 252, 246, 0.95);
+	}
 
-  #dbo-figure .viz-status-content {
-    font-size: 0.72rem;
-    letter-spacing: 0.01em;
-    color: var(--muted);
-  }
+	#dbo-figure .viz-status-content {
+		font-size: 0.72rem;
+		letter-spacing: 0.01em;
+		color: var(--muted);
+	}
 
-  /* Main visualization panels */
-  #dbo-figure .viz-grid {
-    gap: 14px;
-  }
+	/* Main visualization panels */
+	#dbo-figure .viz-grid {
+		gap: 14px;
+	}
 
-  #dbo-figure .viz-card {
-    border: none;
-    border-radius: 12px;
-    background: rgba(255, 252, 246, 0.72);
-    overflow: hidden;
-  }
+	#dbo-figure .viz-card {
+		border: none;
+		border-radius: 12px;
+		background: rgba(255, 252, 246, 0.72);
+		overflow: hidden;
+	}
 
-  #dbo-figure .viz-card-header {
-    padding: 10px 12px;
-    background: linear-gradient(180deg, rgba(255, 248, 239, 0.82), rgba(255, 252, 246, 0.6));
-    border-bottom: none;
-  }
+	#dbo-figure .viz-card-header {
+		padding: 10px 12px;
+		background: linear-gradient(180deg, rgba(255, 248, 239, 0.82), rgba(255, 252, 246, 0.6));
+		border-bottom: none;
+	}
 
-  #dbo-figure .viz-card-title {
-    color: var(--muted);
-    letter-spacing: 0.09em;
-    font-size: 0.66rem;
-  }
+	#dbo-figure .viz-card-title {
+		color: var(--muted);
+		letter-spacing: 0.09em;
+		font-size: 0.66rem;
+	}
 
-  #dbo-figure .viz-card-body {
-    padding: 11px 12px 12px;
-  }
+	#dbo-figure .viz-card-body {
+		padding: 11px 12px 12px;
+	}
 
-  #dbo-figure .viz-canvas-wrap {
-    margin-bottom: 10px;
-    min-height: 220px;
-    border: none;
-    border-radius: 10px;
-    background: rgba(255, 248, 239, 0.5);
-  }
+	#dbo-figure .viz-canvas-wrap {
+		margin-bottom: 10px;
+		min-height: 220px;
+		border: none;
+		border-radius: 10px;
+		background: rgba(255, 248, 239, 0.5);
+	}
 
-  #dbo-figure .viz-canvas-wrap-timeline {
-    height: 210px;
-    min-height: 210px;
-  }
+	#dbo-figure .viz-canvas-wrap-timeline {
+		height: 210px;
+		min-height: 210px;
+	}
 
-  #dbo-figure .viz-canvas-wrap-curves {
-    height: 220px;
-    min-height: 220px;
-  }
+	#dbo-figure .viz-canvas-wrap-curves {
+		height: 220px;
+		min-height: 220px;
+	}
 
-  #dbo-figure #timeline.viz-canvas,
-  #dbo-figure #curves.viz-canvas {
-    background: transparent;
-    border-radius: 10px;
-  }
+	#dbo-figure #timeline.viz-canvas,
+	#dbo-figure #curves.viz-canvas {
+		background: transparent;
+		border-radius: 10px;
+	}
 
-  #dbo-figure .viz-legend {
-    margin-top: 8px;
-    gap: 12px;
-  }
+	#dbo-figure .viz-legend {
+		margin-top: 8px;
+		gap: 12px;
+	}
 
-  #dbo-figure .viz-legend-item {
-    font-size: 0.73rem;
-    line-height: 1.25;
-    color: var(--muted);
-  }
+	#dbo-figure .viz-legend-item {
+		font-size: 0.73rem;
+		line-height: 1.25;
+		color: var(--muted);
+	}
 
-  #dbo-figure .viz-details {
-    margin-top: 11px;
-    border: none;
-    border-radius: 10px;
-    background: rgba(255, 252, 246, 0.86);
-  }
+	#dbo-figure .viz-details {
+		margin-top: 11px;
+		border: none;
+		border-radius: 10px;
+		background: rgba(255, 252, 246, 0.86);
+	}
 
-  #dbo-figure .viz-details summary {
-    padding: 9px 12px;
-    border-bottom: none;
-    background: rgba(255, 248, 239, 0.72);
-  }
+	#dbo-figure .viz-details summary {
+		padding: 9px 12px;
+		border-bottom: none;
+		background: rgba(255, 248, 239, 0.72);
+	}
 
-  #dbo-figure .viz-details[open] summary {
-    border-bottom: none;
-  }
+	#dbo-figure .viz-details[open] summary {
+		border-bottom: none;
+	}
 
-  #dbo-figure .viz-math-note {
-    margin: 6px 0 10px;
-    font-size: 0.78rem;
-    line-height: 1.55;
-    color: var(--muted);
-    max-width: 72ch;
-  }
+	#dbo-figure .viz-math-note {
+		margin: 6px 0 10px;
+		font-size: 0.78rem;
+		line-height: 1.55;
+		color: var(--muted);
+		max-width: 72ch;
+	}
 
-  #dbo-figure figcaption {
-    margin-top: 11px;
-    font-size: 0.92rem;
-    line-height: 1.62;
-    color: var(--muted);
-    max-width: none;
-    width: 100%;
-  }
+	#dbo-figure figcaption {
+		margin-top: 11px;
+		font-size: 0.92rem;
+		line-height: 1.62;
+		color: var(--muted);
+		max-width: none;
+		width: 100%;
+	}
 
-  /* Custom CSS Tooltip */
-  #dbo-figure .viz-segment[data-tooltip]:hover::after {
-    content: attr(data-tooltip);
-    position: absolute;
-    bottom: 100%;
-    left: 50%;
-    transform: translateX(-50%) translateY(-4px);
-    background: var(--surface);
-    color: var(--muted);
-    border: none;
-    padding: 8px 12px;
-    border-radius: 6px;
-    font-size: 0.7rem;
-    font-weight: 400;
-    line-height: 1.4;
-    text-align: center;
-    width: max-content;
-    max-width: 220px;
-    z-index: 100;
-    pointer-events: none;
-    animation: tooltip-fade 0.2s ease-out forwards;
-  }
+	/* Custom CSS Tooltip */
+	#dbo-figure .viz-segment[data-tooltip]:hover::after {
+		content: attr(data-tooltip);
+		position: absolute;
+		bottom: 100%;
+		left: 50%;
+		transform: translateX(-50%) translateY(-4px);
+		background: var(--surface);
+		color: var(--muted);
+		border: none;
+		padding: 8px 12px;
+		border-radius: 6px;
+		font-size: 0.7rem;
+		font-weight: 400;
+		line-height: 1.4;
+		text-align: center;
+		width: max-content;
+		max-width: 220px;
+		z-index: 100;
+		pointer-events: none;
+		animation: tooltip-fade 0.2s ease-out forwards;
+	}
 
-  @media (max-width: 1100px) {
-    #dbo-figure .viz-controls {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
+	@media (max-width: 1100px) {
+		#dbo-figure .viz-controls {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
 
-    #dbo-figure #kpiLine {
-      max-width: 100%;
-      width: 100%;
-      text-align: left;
-      margin-top: 4px;
-    }
+		#dbo-figure #kpiLine {
+			max-width: 100%;
+			width: 100%;
+			text-align: left;
+			margin-top: 4px;
+		}
 
-    #dbo-figure .viz-grid {
-      gap: 12px;
-    }
-  }
+		#dbo-figure .viz-grid {
+			gap: 12px;
+		}
+	}
 
-  @media (max-width: 760px) {
-    #dbo-figure .viz-controls {
-      grid-template-columns: 1fr;
-      gap: 8px;
-    }
+	@media (max-width: 760px) {
+		#dbo-figure .viz-controls {
+			grid-template-columns: 1fr;
+			gap: 8px;
+		}
 
-    #dbo-figure .viz-toolbar {
-      padding: 9px 10px;
-    }
+		#dbo-figure .viz-toolbar {
+			padding: 9px 10px;
+		}
 
-    #dbo-figure .viz-actions {
-      margin-left: 0;
-      width: 100%;
-      justify-content: space-between;
-    }
+		#dbo-figure .viz-actions {
+			margin-left: 0;
+			width: 100%;
+			justify-content: space-between;
+		}
 
-    #dbo-figure .viz-presets {
-      border-left: none;
-      padding-left: 0;
-    }
+		#dbo-figure .viz-presets {
+			border-left: none;
+			padding-left: 0;
+		}
 
-    #dbo-figure .viz-group {
-      width: 100%;
-    }
+		#dbo-figure .viz-group {
+			width: 100%;
+		}
 
-    #dbo-figure .viz-segment {
-      flex: 1 1 auto;
-      min-width: 98px;
-    }
+		#dbo-figure .viz-segment {
+			flex: 1 1 auto;
+			min-width: 98px;
+		}
 
-    #dbo-figure .viz-canvas-wrap-timeline {
-      height: 222px;
-      min-height: 222px;
-    }
+		#dbo-figure .viz-canvas-wrap-timeline {
+			height: 222px;
+			min-height: 222px;
+		}
 
-    #dbo-figure .viz-canvas-wrap-curves {
-      height: 236px;
-      min-height: 236px;
-    }
-  }
+		#dbo-figure .viz-canvas-wrap-curves {
+			height: 236px;
+			min-height: 236px;
+		}
+	}
 
-  @keyframes tooltip-fade {
-    from { opacity: 0; transform: translateX(-50%) translateY(0); }
-    to { opacity: 1; transform: translateX(-50%) translateY(-8px); }
-  }
+	@keyframes tooltip-fade {
+		from {
+			opacity: 0;
+			transform: translateX(-50%) translateY(0);
+		}
+		to {
+			opacity: 1;
+			transform: translateX(-50%) translateY(-8px);
+		}
+	}
 </style>
 
-<script src="/scripts/moe-widget.js" is:inline></script>
+<script src='/impala_blog/scripts/moe-widget.js' is:inline></script>

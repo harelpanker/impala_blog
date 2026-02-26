@@ -2,420 +2,434 @@
 import { getCollection, type CollectionEntry } from 'astro:content';
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
-  month: 'short',
-  day: 'numeric',
-  year: 'numeric',
+	month: 'short',
+	day: 'numeric',
+	year: 'numeric',
 });
 
 const allPosts = await getCollection('blog');
 const publishedPosts = allPosts.filter((post) => !post.data.draft);
 
 const bySeries = new Map<
-  string,
-  {
-    seriesId: string;
-    seriesTitle: string;
-    totalParts: number;
-    parts: CollectionEntry<'blog'>[];
-    reference?: CollectionEntry<'blog'>;
-  }
+	string,
+	{
+		seriesId: string;
+		seriesTitle: string;
+		totalParts: number;
+		parts: CollectionEntry<'blog'>[];
+		reference?: CollectionEntry<'blog'>;
+	}
 >();
 
 for (const post of allPosts) {
-  if (!post.data.seriesId) continue;
+	if (!post.data.seriesId) continue;
 
-  const seriesId = post.data.seriesId;
-  const existing = bySeries.get(seriesId);
+	const seriesId = post.data.seriesId;
+	const existing = bySeries.get(seriesId);
 
-  if (!existing) {
-    bySeries.set(seriesId, {
-      seriesId,
-      seriesTitle: post.data.seriesTitle ?? seriesId,
-      totalParts: post.data.totalParts ?? (post.data.part ?? 1),
-      parts: post.data.reference ? [] : [post],
-      reference: post.data.reference && !post.data.draft ? post : undefined,
-    });
-    continue;
-  }
+	if (!existing) {
+		bySeries.set(seriesId, {
+			seriesId,
+			seriesTitle: post.data.seriesTitle ?? seriesId,
+			totalParts: post.data.totalParts ?? post.data.part ?? 1,
+			parts: post.data.reference ? [] : [post],
+			reference: post.data.reference && !post.data.draft ? post : undefined,
+		});
+		continue;
+	}
 
-  if (post.data.reference && !post.data.draft) {
-    existing.reference = post;
-  } else if (!post.data.reference) {
-    existing.parts.push(post);
-  }
+	if (post.data.reference && !post.data.draft) {
+		existing.reference = post;
+	} else if (!post.data.reference) {
+		existing.parts.push(post);
+	}
 
-  existing.totalParts = Math.max(existing.totalParts, post.data.totalParts ?? 0, post.data.part ?? 0);
+	existing.totalParts = Math.max(existing.totalParts, post.data.totalParts ?? 0, post.data.part ?? 0);
 }
 
 const seriesList = [...bySeries.values()]
-  .map((series) => ({
-    ...series,
-    parts: series.parts.sort((a, b) => (a.data.part ?? 999) - (b.data.part ?? 999)),
-  }))
-  .sort((a, b) => a.seriesTitle.localeCompare(b.seriesTitle));
+	.map((series) => ({
+		...series,
+		parts: series.parts.sort((a, b) => (a.data.part ?? 999) - (b.data.part ?? 999)),
+	}))
+	.sort((a, b) => a.seriesTitle.localeCompare(b.seriesTitle));
 
 const referencePosts = publishedPosts
-  .filter((post) => post.data.reference)
-  .sort((a, b) => b.data.pubDate.getTime() - a.data.pubDate.getTime());
+	.filter((post) => post.data.reference)
+	.sort((a, b) => b.data.pubDate.getTime() - a.data.pubDate.getTime());
 
 const standalonePosts = publishedPosts
-  .filter((post) => !post.data.seriesId && !post.data.reference)
-  .sort((a, b) => b.data.pubDate.getTime() - a.data.pubDate.getTime());
+	.filter((post) => !post.data.seriesId && !post.data.reference)
+	.sort((a, b) => b.data.pubDate.getTime() - a.data.pubDate.getTime());
 ---
 
 <!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta
-      name="description"
-      content="Technical deep-dives from Impala AI on MoE inference, distributed systems, and production ML infrastructure."
-    />
-    <title>Impala AI Blog</title>
-  </head>
-  <body>
-    <main class="page-shell">
-      <header class="hero">
-        <p class="eyebrow">Impala AI</p>
-        <h1>Technical Blog</h1>
-        <p class="subtitle">
-          Production-grade notes on MoE serving, systems bottlenecks, and practical optimization in vLLM.
-        </p>
-      </header>
+<html lang='en'>
+	<head>
+		<meta charset='utf-8' />
+		<meta name='viewport' content='width=device-width, initial-scale=1' />
+		<meta
+			name='description'
+			content='Technical deep-dives from Impala AI on MoE inference, distributed systems, and production ML infrastructure.'
+		/>
+		<title>Impala AI Blog</title>
+	</head>
+	<body>
+		<main class='page-shell'>
+			<header class='hero'>
+				<p class='eyebrow'>Impala AI</p>
+				<h1>Technical Blog</h1>
+				<p class='subtitle'>
+					Production-grade notes on MoE serving, systems bottlenecks, and practical optimization in vLLM.
+				</p>
+			</header>
 
-      {seriesList.length > 0 && (
-        <section class="section-block">
-          <p class="section-label">Series</p>
-          <div class="series-stack">
-            {seriesList.map((series) => {
-              const partLookup = new Map(series.parts.map((part) => [part.data.part, part] as const));
-              const expectedParts = Array.from({ length: Math.max(series.totalParts, 1) }, (_, i) => i + 1);
+			{
+				seriesList.length > 0 && (
+					<section class='section-block'>
+						<p class='section-label'>Series</p>
+						<div class='series-stack'>
+							{seriesList.map((series) => {
+								const partLookup = new Map(series.parts.map((part) => [part.data.part, part] as const));
+								const expectedParts = Array.from({ length: Math.max(series.totalParts, 1) }, (_, i) => i + 1);
 
-              return (
-                <article class="series-card">
-                  <div class="series-head">
-                    <h2>{series.seriesTitle}</h2>
-                    <span>{series.totalParts} parts</span>
-                  </div>
+								return (
+									<article class='series-card'>
+										<div class='series-head'>
+											<h2>{series.seriesTitle}</h2>
+											<span>{series.totalParts} parts</span>
+										</div>
 
-                  <div class="series-grid">
-                    {expectedParts.map((partNumber) => {
-                      const part = partLookup.get(partNumber);
+										<div class='series-grid'>
+											{expectedParts.map((partNumber) => {
+												const part = partLookup.get(partNumber);
 
-                      if (!part) {
-                        return (
-                          <div class="part-card coming-soon">
-                            <p class="part-kicker">Part {partNumber}</p>
-                            <h3>Coming soon</h3>
-                          </div>
-                        );
-                      }
+												if (!part) {
+													return (
+														<div class='part-card coming-soon'>
+															<p class='part-kicker'>Part {partNumber}</p>
+															<h3>Coming soon</h3>
+														</div>
+													);
+												}
 
-                      if (part.data.draft) {
-                        return (
-                          <div class="part-card coming-soon">
-                            <p class="part-kicker">Part {partNumber}</p>
-                            <h3>{part.data.title}</h3>
-                            <p>Coming soon</p>
-                          </div>
-                        );
-                      }
+												if (part.data.draft) {
+													return (
+														<div class='part-card coming-soon'>
+															<p class='part-kicker'>Part {partNumber}</p>
+															<h3>{part.data.title}</h3>
+															<p>Coming soon</p>
+														</div>
+													);
+												}
 
-                      return (
-                        <a class="part-card" href={`/blog/${part.slug}/`}>
-                          <p class="part-kicker">Part {partNumber}</p>
-                          <h3>{part.data.title}</h3>
-                          <p>{part.data.description}</p>
-                        </a>
-                      );
-                    })}
-                  </div>
+												return (
+													<a class='part-card' href={`/impala_blog/blog/${part.slug}/`}>
+														<p class='part-kicker'>Part {partNumber}</p>
+														<h3>{part.data.title}</h3>
+														<p>{part.data.description}</p>
+													</a>
+												);
+											})}
+										</div>
 
-                  {series.reference && (
-                    <a class="series-reference-link" href={`/blog/${series.reference.slug}/`}>
-                      Read full reference edition →
-                    </a>
-                  )}
-                </article>
-              );
-            })}
-          </div>
-        </section>
-      )}
+										{series.reference && (
+											<a class='series-reference-link' href={`/impala_blog/blog/${series.reference.slug}/`}>
+												Read full reference edition →
+											</a>
+										)}
+									</article>
+								);
+							})}
+						</div>
+					</section>
+				)
+			}
 
-      {referencePosts.length > 0 && (
-        <section class="section-block">
-          <p class="section-label">Reference Editions</p>
-          <div class="post-grid">
-            {referencePosts.map((post) => (
-              <a class="post-card reference" href={`/blog/${post.slug}/`}>
-                <div class="card-meta">
-                  <time datetime={post.data.pubDate.toISOString()}>{dateFormatter.format(post.data.pubDate)}</time>
-                  <span>{post.data.author}</span>
-                </div>
-                <h3>{post.data.title}</h3>
-                <p>{post.data.description}</p>
-              </a>
-            ))}
-          </div>
-        </section>
-      )}
+			{
+				referencePosts.length > 0 && (
+					<section class='section-block'>
+						<p class='section-label'>Reference Editions</p>
+						<div class='post-grid'>
+							{referencePosts.map((post) => (
+								<a class='post-card reference' href={`/impala_blog/blog/${post.slug}/`}>
+									<div class='card-meta'>
+										<time datetime={post.data.pubDate.toISOString()}>{dateFormatter.format(post.data.pubDate)}</time>
+										<span>{post.data.author}</span>
+									</div>
+									<h3>{post.data.title}</h3>
+									<p>{post.data.description}</p>
+								</a>
+							))}
+						</div>
+					</section>
+				)
+			}
 
-      {standalonePosts.length > 0 && (
-        <section class="section-block">
-          <p class="section-label">Other Posts</p>
-          <div class="post-grid">
-            {standalonePosts.map((post) => (
-              <a class="post-card" href={`/blog/${post.slug}/`}>
-                <div class="card-meta">
-                  <time datetime={post.data.pubDate.toISOString()}>{dateFormatter.format(post.data.pubDate)}</time>
-                  <span>{post.data.author}</span>
-                </div>
-                <h3>{post.data.title}</h3>
-                <p>{post.data.description}</p>
-              </a>
-            ))}
-          </div>
-        </section>
-      )}
-    </main>
-  </body>
+			{
+				standalonePosts.length > 0 && (
+					<section class='section-block'>
+						<p class='section-label'>Other Posts</p>
+						<div class='post-grid'>
+							{standalonePosts.map((post) => (
+								<a class='post-card' href={`/impala_blog/blog/${post.slug}/`}>
+									<div class='card-meta'>
+										<time datetime={post.data.pubDate.toISOString()}>{dateFormatter.format(post.data.pubDate)}</time>
+										<span>{post.data.author}</span>
+									</div>
+									<h3>{post.data.title}</h3>
+									<p>{post.data.description}</p>
+								</a>
+							))}
+						</div>
+					</section>
+				)
+			}
+		</main>
+	</body>
 </html>
 
 <style>
-  @font-face {
-    font-family: "DM Sans";
-    src: url("https://cdn.prod.website-files.com/68ac5846a995a97fabe3fd02/68ac5846a995a97fabe3fd16_dm_sans.woff2") format("woff2");
-    font-weight: 100 1000;
-    font-style: normal;
-    font-display: swap;
-  }
+	@font-face {
+		font-family: 'DM Sans';
+		src: url('https://cdn.prod.website-files.com/68ac5846a995a97fabe3fd02/68ac5846a995a97fabe3fd16_dm_sans.woff2')
+			format('woff2');
+		font-weight: 100 1000;
+		font-style: normal;
+		font-display: swap;
+	}
 
-  @font-face {
-    font-family: "Polysans";
-    src: url("https://cdn.prod.website-files.com/68ac5846a995a97fabe3fd02/68f4bf8939e52d48a079fc89_PolySans-Neutral.woff2") format("woff2");
-    font-weight: 400;
-    font-style: normal;
-    font-display: swap;
-  }
+	@font-face {
+		font-family: 'Polysans';
+		src: url('https://cdn.prod.website-files.com/68ac5846a995a97fabe3fd02/68f4bf8939e52d48a079fc89_PolySans-Neutral.woff2')
+			format('woff2');
+		font-weight: 400;
+		font-style: normal;
+		font-display: swap;
+	}
 
-  @font-face {
-    font-family: "Polysans";
-    src: url("https://cdn.prod.website-files.com/68ac5846a995a97fabe3fd02/68f4bf88c8152c3eb14d0911_PolySans-Bulky.woff2") format("woff2");
-    font-weight: 700;
-    font-style: normal;
-    font-display: swap;
-  }
+	@font-face {
+		font-family: 'Polysans';
+		src: url('https://cdn.prod.website-files.com/68ac5846a995a97fabe3fd02/68f4bf88c8152c3eb14d0911_PolySans-Bulky.woff2')
+			format('woff2');
+		font-weight: 700;
+		font-style: normal;
+		font-display: swap;
+	}
 
-  :root {
-    --impala-cream: #fffcf6;
-    --impala-cream-2: #fff8ef;
-    --impala-ink: #101828;
-    --impala-brown: #4e181a;
-    --impala-brown-deep: #460f12;
-    --impala-blue: #227bfb;
-    --muted: rgba(16, 24, 40, 0.72);
-    --muted-2: rgba(16, 24, 40, 0.56);
-    --border: rgba(78, 24, 26, 0.11);
-    --r-lg: 18px;
-    --r-md: 13px;
-  }
+	:root {
+		--impala-cream: #fffcf6;
+		--impala-cream-2: #fff8ef;
+		--impala-ink: #101828;
+		--impala-brown: #4e181a;
+		--impala-brown-deep: #460f12;
+		--impala-blue: #227bfb;
+		--muted: rgba(16, 24, 40, 0.72);
+		--muted-2: rgba(16, 24, 40, 0.56);
+		--border: rgba(78, 24, 26, 0.11);
+		--r-lg: 18px;
+		--r-md: 13px;
+	}
 
-  html,
-  body {
-    margin: 0;
-    min-height: 100%;
-    color: var(--impala-ink);
-    font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background:
-      radial-gradient(1200px 520px at 90% -10%, rgba(34, 123, 251, 0.12), transparent 60%),
-      radial-gradient(900px 420px at -10% 12%, rgba(78, 24, 26, 0.08), transparent 58%),
-      linear-gradient(180deg, var(--impala-cream), var(--impala-cream-2));
-  }
+	html,
+	body {
+		margin: 0;
+		min-height: 100%;
+		color: var(--impala-ink);
+		font-family:
+			'DM Sans',
+			-apple-system,
+			BlinkMacSystemFont,
+			'Segoe UI',
+			sans-serif;
+		background:
+			radial-gradient(1200px 520px at 90% -10%, rgba(34, 123, 251, 0.12), transparent 60%),
+			radial-gradient(900px 420px at -10% 12%, rgba(78, 24, 26, 0.08), transparent 58%),
+			linear-gradient(180deg, var(--impala-cream), var(--impala-cream-2));
+	}
 
-  .page-shell {
-    width: min(1120px, 92vw);
-    margin: 0 auto;
-    padding: 3.1rem 0 4rem;
-  }
+	.page-shell {
+		width: min(1120px, 92vw);
+		margin: 0 auto;
+		padding: 3.1rem 0 4rem;
+	}
 
-  .hero {
-    margin-bottom: 2rem;
-  }
+	.hero {
+		margin-bottom: 2rem;
+	}
 
-  .eyebrow,
-  .section-label,
-  .part-kicker {
-    margin: 0;
-    font-family: "JetBrains Mono", "SF Mono", monospace;
-    letter-spacing: 0.15em;
-    text-transform: uppercase;
-    font-size: 0.72rem;
-    color: rgba(78, 24, 26, 0.82);
-  }
+	.eyebrow,
+	.section-label,
+	.part-kicker {
+		margin: 0;
+		font-family: 'JetBrains Mono', 'SF Mono', monospace;
+		letter-spacing: 0.15em;
+		text-transform: uppercase;
+		font-size: 0.72rem;
+		color: rgba(78, 24, 26, 0.82);
+	}
 
-  h1 {
-    margin: 0.64rem 0;
-    font-family: "Polysans", "DM Sans", sans-serif;
-    font-weight: 700;
-    letter-spacing: -0.03em;
-    color: var(--impala-brown-deep);
-    font-size: clamp(2.1rem, 4.3vw, 3.45rem);
-    line-height: 0.96;
-  }
+	h1 {
+		margin: 0.64rem 0;
+		font-family: 'Polysans', 'DM Sans', sans-serif;
+		font-weight: 700;
+		letter-spacing: -0.03em;
+		color: var(--impala-brown-deep);
+		font-size: clamp(2.1rem, 4.3vw, 3.45rem);
+		line-height: 0.96;
+	}
 
-  .subtitle {
-    margin: 0;
-    max-width: 52rem;
-    color: rgba(16, 24, 40, 0.8);
-    font-size: clamp(1rem, 1.6vw, 1.22rem);
-    line-height: 1.5;
-  }
+	.subtitle {
+		margin: 0;
+		max-width: 52rem;
+		color: rgba(16, 24, 40, 0.8);
+		font-size: clamp(1rem, 1.6vw, 1.22rem);
+		line-height: 1.5;
+	}
 
-  .section-block {
-    margin-bottom: 2rem;
-  }
+	.section-block {
+		margin-bottom: 2rem;
+	}
 
-  .series-stack {
-    margin-top: 0.85rem;
-    display: grid;
-    gap: 1rem;
-  }
+	.series-stack {
+		margin-top: 0.85rem;
+		display: grid;
+		gap: 1rem;
+	}
 
-  .series-card,
-  .post-card,
-  .part-card {
-    border-radius: var(--r-lg);
-    background: linear-gradient(180deg, rgba(255, 252, 246, 0.94), rgba(255, 248, 239, 0.94));
-    border: 1px solid var(--border);
-    text-decoration: none;
-    color: inherit;
-  }
+	.series-card,
+	.post-card,
+	.part-card {
+		border-radius: var(--r-lg);
+		background: linear-gradient(180deg, rgba(255, 252, 246, 0.94), rgba(255, 248, 239, 0.94));
+		border: 1px solid var(--border);
+		text-decoration: none;
+		color: inherit;
+	}
 
-  .series-card {
-    padding: 1rem;
-  }
+	.series-card {
+		padding: 1rem;
+	}
 
-  .series-head {
-    display: flex;
-    justify-content: space-between;
-    gap: 0.75rem;
-    align-items: baseline;
-    margin-bottom: 0.8rem;
-  }
+	.series-head {
+		display: flex;
+		justify-content: space-between;
+		gap: 0.75rem;
+		align-items: baseline;
+		margin-bottom: 0.8rem;
+	}
 
-  .series-head h2 {
-    margin: 0;
-    font-family: "Polysans", "DM Sans", sans-serif;
-    font-size: clamp(1.15rem, 2vw, 1.5rem);
-    color: var(--impala-brown-deep);
-    line-height: 1.18;
-  }
+	.series-head h2 {
+		margin: 0;
+		font-family: 'Polysans', 'DM Sans', sans-serif;
+		font-size: clamp(1.15rem, 2vw, 1.5rem);
+		color: var(--impala-brown-deep);
+		line-height: 1.18;
+	}
 
-  .series-head span {
-    font-size: 0.8rem;
-    color: var(--muted-2);
-    font-family: "JetBrains Mono", "SF Mono", monospace;
-  }
+	.series-head span {
+		font-size: 0.8rem;
+		color: var(--muted-2);
+		font-family: 'JetBrains Mono', 'SF Mono', monospace;
+	}
 
-  .series-grid {
-    display: grid;
-    gap: 0.7rem;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
+	.series-grid {
+		display: grid;
+		gap: 0.7rem;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+	}
 
-  .part-card {
-    border-radius: var(--r-md);
-    padding: 0.8rem;
-    min-height: 138px;
-  }
+	.part-card {
+		border-radius: var(--r-md);
+		padding: 0.8rem;
+		min-height: 138px;
+	}
 
-  .part-card h3 {
-    margin: 0.5rem 0 0.4rem;
-    font-family: "Polysans", "DM Sans", sans-serif;
-    color: var(--impala-brown-deep);
-    font-size: 1rem;
-    line-height: 1.22;
-  }
+	.part-card h3 {
+		margin: 0.5rem 0 0.4rem;
+		font-family: 'Polysans', 'DM Sans', sans-serif;
+		color: var(--impala-brown-deep);
+		font-size: 1rem;
+		line-height: 1.22;
+	}
 
-  .part-card p {
-    margin: 0;
-    color: var(--muted);
-    line-height: 1.45;
-    font-size: 0.95rem;
-  }
+	.part-card p {
+		margin: 0;
+		color: var(--muted);
+		line-height: 1.45;
+		font-size: 0.95rem;
+	}
 
-  .part-card.coming-soon {
-    background: rgba(16, 24, 40, 0.04);
-  }
+	.part-card.coming-soon {
+		background: rgba(16, 24, 40, 0.04);
+	}
 
-  .series-reference-link {
-    display: inline-block;
-    margin-top: 0.78rem;
-    font-size: 0.85rem;
-    font-family: "JetBrains Mono", "SF Mono", monospace;
-    text-decoration: none;
-    color: var(--impala-blue);
-  }
+	.series-reference-link {
+		display: inline-block;
+		margin-top: 0.78rem;
+		font-size: 0.85rem;
+		font-family: 'JetBrains Mono', 'SF Mono', monospace;
+		text-decoration: none;
+		color: var(--impala-blue);
+	}
 
-  .post-grid {
-    margin-top: 0.85rem;
-    display: grid;
-    gap: 0.9rem;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+	.post-grid {
+		margin-top: 0.85rem;
+		display: grid;
+		gap: 0.9rem;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
 
-  .post-card {
-    border-radius: var(--r-md);
-    padding: 0.92rem;
-  }
+	.post-card {
+		border-radius: var(--r-md);
+		padding: 0.92rem;
+	}
 
-  .post-card.reference {
-    background: linear-gradient(180deg, rgba(255, 242, 219, 0.9), rgba(255, 248, 239, 0.9));
-  }
+	.post-card.reference {
+		background: linear-gradient(180deg, rgba(255, 242, 219, 0.9), rgba(255, 248, 239, 0.9));
+	}
 
-  .post-card h3 {
-    margin: 0.5rem 0 0.38rem;
-    font-family: "Polysans", "DM Sans", sans-serif;
-    font-size: 1.1rem;
-    color: var(--impala-brown-deep);
-    line-height: 1.2;
-  }
+	.post-card h3 {
+		margin: 0.5rem 0 0.38rem;
+		font-family: 'Polysans', 'DM Sans', sans-serif;
+		font-size: 1.1rem;
+		color: var(--impala-brown-deep);
+		line-height: 1.2;
+	}
 
-  .post-card p {
-    margin: 0;
-    color: var(--muted);
-    line-height: 1.45;
-  }
+	.post-card p {
+		margin: 0;
+		color: var(--muted);
+		line-height: 1.45;
+	}
 
-  .card-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.45rem;
-    color: var(--muted-2);
-    font-family: "JetBrains Mono", "SF Mono", monospace;
-    font-size: 0.78rem;
-  }
+	.card-meta {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.45rem;
+		color: var(--muted-2);
+		font-family: 'JetBrains Mono', 'SF Mono', monospace;
+		font-size: 0.78rem;
+	}
 
-  @media (max-width: 940px) {
-    .series-grid {
-      grid-template-columns: 1fr;
-    }
+	@media (max-width: 940px) {
+		.series-grid {
+			grid-template-columns: 1fr;
+		}
 
-    .part-card {
-      min-height: 0;
-    }
+		.part-card {
+			min-height: 0;
+		}
 
-    .post-grid {
-      grid-template-columns: 1fr;
-    }
-  }
+		.post-grid {
+			grid-template-columns: 1fr;
+		}
+	}
 
-  @media (max-width: 560px) {
-    .page-shell {
-      width: min(1120px, 93vw);
-      padding-top: 2.2rem;
-    }
-  }
+	@media (max-width: 560px) {
+		.page-shell {
+			width: min(1120px, 93vw);
+			padding-top: 2.2rem;
+		}
+	}
 </style>
