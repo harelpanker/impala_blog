@@ -1,5 +1,6 @@
 ---
 import { getCollection, type CollectionEntry } from 'astro:content';
+import '../styles/fonts.css';
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
 	month: 'short',
@@ -82,6 +83,8 @@ const standalonePosts = publishedPosts
 				<p class='subtitle'>
 					Production-grade notes on MoE serving, systems bottlenecks, and practical optimization in vLLM.
 				</p>
+
+				<ul></ul>
 			</header>
 
 			{
@@ -185,38 +188,38 @@ const standalonePosts = publishedPosts
 					</section>
 				)
 			}
+
+			<section class='section-block'>
+				<p class='section-label'>Interactive Figures</p>
+				<div class='post-grid'>
+					<a class='post-card' href='/impala_blog/embed/dbo-figure/'>
+						<div class='card-meta'>
+							<span>Interactive Tool</span>
+						</div>
+						<h3>DBO Model</h3>
+						<p>Interactive performance model for Dual-Batch Overlap optimization.</p>
+					</a>
+					<a class='post-card' href='/impala_blog/embed/deepep-figure/'>
+						<div class='card-meta'>
+							<span>Interactive Tool</span>
+						</div>
+						<h3>DeepEP Visualization</h3>
+						<p>Performance analysis and visualization for DeepEP communication patterns.</p>
+					</a>
+					<a class='post-card' href='/impala_blog/embed/eplb-figure/'>
+						<div class='card-meta'>
+							<span>Interactive Tool</span>
+						</div>
+						<h3>EPLB Model</h3>
+						<p>Expert-Parallelism Load Balancing performance model.</p>
+					</a>
+				</div>
+			</section>
 		</main>
 	</body>
 </html>
 
 <style>
-	@font-face {
-		font-family: 'DM Sans';
-		src: url('https://cdn.prod.website-files.com/68ac5846a995a97fabe3fd02/68ac5846a995a97fabe3fd16_dm_sans.woff2')
-			format('woff2');
-		font-weight: 100 1000;
-		font-style: normal;
-		font-display: swap;
-	}
-
-	@font-face {
-		font-family: 'Polysans';
-		src: url('https://cdn.prod.website-files.com/68ac5846a995a97fabe3fd02/68f4bf8939e52d48a079fc89_PolySans-Neutral.woff2')
-			format('woff2');
-		font-weight: 400;
-		font-style: normal;
-		font-display: swap;
-	}
-
-	@font-face {
-		font-family: 'Polysans';
-		src: url('https://cdn.prod.website-files.com/68ac5846a995a97fabe3fd02/68f4bf88c8152c3eb14d0911_PolySans-Bulky.woff2')
-			format('woff2');
-		font-weight: 700;
-		font-style: normal;
-		font-display: swap;
-	}
-
 	:root {
 		--impala-cream: #fffcf6;
 		--impala-cream-2: #fff8ef;

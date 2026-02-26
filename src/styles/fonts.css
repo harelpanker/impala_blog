@@ -1,0 +1,80 @@
+@font-face {
+	font-family: 'DM Sans';
+	src: url('https://cdn.prod.website-files.com/68ac5846a995a97fabe3fd02/68ac5846a995a97fabe3fd16_dm_sans.woff2')
+		format('woff2');
+	font-weight: 100 1000;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Polysans';
+	src: url('https://cdn.prod.website-files.com/68ac5846a995a97fabe3fd02/68f4bf88335cc81f94d40cab_PolySans-Slim.woff2')
+		format('woff2');
+	font-weight: 300;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Polysans';
+	src: url('https://cdn.prod.website-files.com/68ac5846a995a97fabe3fd02/68f4bf8939e52d48a079fc89_PolySans-Neutral.woff2')
+		format('woff2');
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Polysans';
+	src: url('https://cdn.prod.website-files.com/68ac5846a995a97fabe3fd02/68f4bf8851ef4b7fc32b9b51_PolySans-Median.woff2')
+		format('woff2');
+	font-weight: 500;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Polysans';
+	src: url('https://cdn.prod.website-files.com/68ac5846a995a97fabe3fd02/68f4bf88c8152c3eb14d0911_PolySans-Bulky.woff2')
+		format('woff2');
+	font-weight: 700;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Polysans';
+	src: url('https://cdn.prod.website-files.com/68ac5846a995a97fabe3fd02/68f4bf88132d10273f44aeb5_PolySans-SlimItalic.woff2')
+		format('woff2');
+	font-weight: 300;
+	font-style: italic;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Polysans';
+	src: url('https://cdn.prod.website-files.com/68ac5846a995a97fabe3fd02/68f4bf8876d6a294f19e724a_PolySans-NeutralItalic.woff2')
+		format('woff2');
+	font-weight: 400;
+	font-style: italic;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Polysans';
+	src: url('https://cdn.prod.website-files.com/68ac5846a995a97fabe3fd02/68f4bf88c205a6507554a1a0_PolySans-MedianItalic.woff2')
+		format('woff2');
+	font-weight: 500;
+	font-style: italic;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Polysans';
+	src: url('https://cdn.prod.website-files.com/68ac5846a995a97fabe3fd02/68f4bf8839e52d48a079fc85_PolySans-BulkyItalic.woff2')
+		format('woff2');
+	font-weight: 700;
+	font-style: italic;
+	font-display: swap;
+}
