@@ -41,3 +41,12 @@ document.addEventListener("DOMContentLoaded", function() {
   });
 });
 </script>
+
+
+---
+## Your Webflow Embed Links:
+You can now use these links in your Webflow iframes:
+
+- DBO Figure: https://harelpanker.github.io/impala_blog/embed/dbo-figure/
+- DeepEP Figure: https://harelpanker.github.io/impala_blog/embed/deepep-figure/
+- EPLB Figure: https://harelpanker.github.io/impala_blog/embed/eplb-figure/
