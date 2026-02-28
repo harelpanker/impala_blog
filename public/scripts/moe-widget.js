@@ -448,14 +448,16 @@ const ControlState = {
   /** Apply a state object to all controls */
   applyToControls(state) {
     const el = DOMElements;
-    if (!el.tokensSlider) return;
+    if (!el.tokensSlider && !el.tokensSlider2) return;
 
-    el.tokensSlider.value = state.tokensExponent;
-    el.epSlider.value = state.expertParallelism;
-    el.latencySlider.value = state.latencyMicroseconds;
-    el.bandwidthSlider.value = state.bandwidthGBps;
-    el.computeSlider.value = state.computeMicrosecondsPerToken;
-    el.skewSlider.value = state.loadImbalanceSkew;
+    if (el.tokensSlider) {
+      el.tokensSlider.value = state.tokensExponent;
+      el.epSlider.value = state.expertParallelism;
+      el.latencySlider.value = state.latencyMicroseconds;
+      el.bandwidthSlider.value = state.bandwidthGBps;
+      el.computeSlider.value = state.computeMicrosecondsPerToken;
+      el.skewSlider.value = state.loadImbalanceSkew;
+    }
 
     if (el.tokensSlider2) el.tokensSlider2.value = state.tokensExponent;
     if (el.epSlider2) el.epSlider2.value = state.expertParallelism;
@@ -464,9 +466,9 @@ const ControlState = {
     if (el.computeSlider2) el.computeSlider2.value = state.computeMicrosecondsPerToken;
     if (el.skewSlider2) el.skewSlider2.value = state.loadImbalanceSkew;
 
-    el.dboCheckbox.checked = state.enableDBO;
-    el.splitCheckbox.checked = state.enableMicroBatchSplit;
-    el.animateCheckbox.checked = state.enableAnimation;
+    if (el.dboCheckbox) el.dboCheckbox.checked = state.enableDBO;
+    if (el.splitCheckbox) el.splitCheckbox.checked = state.enableMicroBatchSplit;
+    if (el.animateCheckbox) el.animateCheckbox.checked = state.enableAnimation;
 
     AnimationController.reset();
     onStateChange();
@@ -474,15 +476,19 @@ const ControlState = {
 
   /** Read current token count from slider (exponential scale) */
   getTokenCount() {
-    if (!DOMElements.tokensSlider) return 256;
-    const exponent = parseInt(DOMElements.tokensSlider.value, 10);
+    const slider = DOMElements.tokensSlider || DOMElements.tokensSlider2;
+    if (!slider) return 256;
+    const exponent = parseInt(slider.value, 10);
     return Math.round(Math.pow(2, exponent) * 8);
   },
 
   /** Read all model parameters from controls */
   getModelParameters() {
     const el = DOMElements;
-    if (!el.epSlider) {
+    const mainEp = el.epSlider;
+    const altEp = el.epSlider2;
+    
+    if (!mainEp && !altEp) {
       return {
         tokenCount: 256,
         epRanks: 16,
@@ -493,13 +499,29 @@ const ControlState = {
       };
     }
 
+    const sliderSet = mainEp ? {
+      tokens: el.tokensSlider,
+      ep: el.epSlider,
+      lat: el.latencySlider,
+      bw: el.bandwidthSlider,
+      ctok: el.computeSlider,
+      skew: el.skewSlider
+    } : {
+      tokens: el.tokensSlider2,
+      ep: el.epSlider2,
+      lat: el.latencySlider2,
+      bw: el.bandwidthSlider2,
+      ctok: el.computeSlider2,
+      skew: el.skewSlider2
+    };
+
     const params = {
       tokenCount: this.getTokenCount(),
-      epRanks: parseInt(el.epSlider.value, 10),
-      latencyUs: parseFloat(el.latencySlider.value),
-      bandwidthGBps: parseFloat(el.bandwidthSlider.value),
-      computeUsPerToken: parseFloat(el.computeSlider.value),
-      skew: parseFloat(el.skewSlider.value),
+      epRanks: parseInt(sliderSet.ep.value, 10),
+      latencyUs: parseFloat(sliderSet.lat.value),
+      bandwidthGBps: parseFloat(sliderSet.bw.value),
+      computeUsPerToken: parseFloat(sliderSet.ctok.value),
+      skew: parseFloat(sliderSet.skew.value),
     };
 
     // Sanitize NaN values
@@ -530,7 +552,7 @@ const LabelUpdater = {
   /** Update all slider value labels and KPI displays */
   updateAll(timings) {
     const el = DOMElements;
-    if (!el.tokensSlider) return;
+    if (!el.tokensSlider && !el.tokensSlider2) return;
 
     const params = ControlState.getModelParameters();
 
@@ -2246,18 +2268,14 @@ function waitForKaTeX() {
 function initialize(retryCount = 0) {
   DOMElements.init();
 
-  // Check for critical elements from BOTH widgets to ensure full load
   const deepepCheckbox = DOMElements.getDeepepAnimateCheckbox();
+  const hasMainFigure = DOMElements.timelineSvg && DOMElements.curvesSvg && DOMElements.tokensSlider;
+  const hasDeepEP = (DOMElements.deepepCurveSvg || DOMElements.deepepTopoSvg) && (DOMElements.tokensSlider2 || deepepCheckbox);
 
-  if (!DOMElements.timelineSvg || !DOMElements.curvesSvg || !DOMElements.tokensSlider || !deepepCheckbox) {
+  if (!hasMainFigure && !hasDeepEP) {
     if (retryCount < 50) { // Max 2.5 seconds
         if (retryCount % 10 === 0) { // Log every 10th retry
-            console.warn(`Required DOM elements not found (attempt ${retryCount}), retrying...`, {
-              timelineSvg: !!DOMElements.timelineSvg,
-              curvesSvg: !!DOMElements.curvesSvg,
-              tokensSlider: !!DOMElements.tokensSlider,
-              deepepCheckbox: !!deepepCheckbox
-            });
+            console.warn(`No interactive elements found (attempt ${retryCount}), retrying...`);
         }
         setTimeout(() => initialize(retryCount + 1), 50);
         return;

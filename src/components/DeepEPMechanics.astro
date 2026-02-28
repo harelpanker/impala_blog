@@ -1,358 +1,380 @@
 ---
+
 ---
 
-<figure id="deepep-mechanics" class="viz-widget">
-  <div class="viz-widget-header">
-    <h3 class="viz-widget-title">DeepEP: Under the Hood</h3>
-    <span class="viz-kpi" id="deepepTopoKpi">—</span>
-  </div>
-  <div class="viz-widget-body">
-    <div class="viz-toolbar">
-      <div class="viz-controls-primary">
-        <div class="viz-group">
-          <div class="viz-segmented-control">
-            <label class="viz-segment">
-              <input type="radio" name="mechMode" id="mechLL" checked />
-              <span>Low‑latency</span>
-            </label>
-            <label class="viz-segment">
-              <input type="radio" name="mechMode" id="mechHT" />
-              <span>High‑throughput</span>
-            </label>
-          </div>
-          <div class="viz-divider"></div>
-          <label class="viz-toggle viz-toggle-icon-btn">
-            <input type="checkbox" id="mechAnim" checked />
-            <svg class="play-icon" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-            <svg class="pause-icon" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
-            <span>Animate</span>
-          </label>
-        </div>
-        <div class="viz-status-pill">
-            <span class="viz-status-label">Step time:</span>
-            <span class="viz-status-value" id="deepepTimeKpi">—</span>
-        </div>
-      </div>
-    </div>
+<figure id='deepep-mechanics' class='viz-widget'>
+	<div class='viz-widget-header'>
+		<h3 class='viz-widget-title'>DeepEP: Under the Hood</h3>
+		<span class='viz-kpi' id='deepepTopoKpi'>—</span>
+	</div>
+	<div class='viz-widget-body'>
+		<div class='viz-toolbar'>
+			<div class='viz-controls-primary'>
+				<div class='viz-group'>
+					<div class='viz-segmented-control'>
+						<label class='viz-segment'>
+							<input type='radio' name='mechMode' id='mechLL' checked />
+							<span>Low‑latency</span>
+						</label>
+						<label class='viz-segment'>
+							<input type='radio' name='mechMode' id='mechHT' />
+							<span>High‑throughput</span>
+						</label>
+					</div>
+					<div class='viz-divider'></div>
+					<label class='viz-toggle viz-toggle-icon-btn'>
+						<input type='checkbox' id='mechAnim' checked />
+						<svg class='play-icon' width='12' height='12' viewBox='0 0 24 24' fill='currentColor'
+							><path d='M8 5v14l11-7z'></path></svg
+						>
+						<svg class='pause-icon' width='12' height='12' viewBox='0 0 24 24' fill='currentColor'
+							><path d='M6 19h4V5H6v14zm8-14v14h4V5h-4z'></path></svg
+						>
+						<span>Animate</span>
+					</label>
+				</div>
+				<div class='viz-status-pill'>
+					<span class='viz-status-label'>Step time:</span>
+					<span class='viz-status-value' id='deepepTimeKpi'>—</span>
+				</div>
+			</div>
+		</div>
 
-    <div class="viz-grid">
-      <div class="viz-card">
-        <div class="viz-card-header">
-          <h4 class="viz-card-title">Topology Sketch</h4>
-        </div>
-        <div class="viz-card-body">
-          <div class="viz-canvas-wrap">
-            <svg id="deepepTopo" class="viz-canvas" aria-label="Topology diagram" role="img"></svg>
-          </div>
-          <p class="viz-card-caption"><b style="color: var(--comm);">HT:</b> NVLink gather → RDMA → NVLink scatter. <b style="color: var(--dbo);">LL:</b> direct RDMA, double‑buffered.</p>
-        </div>
-      </div>
+		<div class='viz-grid'>
+			<div class='viz-card'>
+				<div class='viz-card-header'>
+					<h4 class='viz-card-title'>Topology Sketch</h4>
+				</div>
+				<div class='viz-card-body'>
+					<div class='viz-canvas-wrap'>
+						<svg id='deepepTopo' class='viz-canvas' aria-label='Topology diagram' role='img'></svg>
+					</div>
+					<p class='viz-card-caption'>
+						<b style='color: var(--comm);'>HT:</b> NVLink gather → RDMA → NVLink scatter. <b style='color: var(--dbo);'
+							>LL:</b
+						> direct RDMA, double‑buffered.
+					</p>
+				</div>
+			</div>
 
-      <div class="viz-card">
-        <div class="viz-card-header">
-          <h4 class="viz-card-title">Double Buffering Schedule</h4>
-        </div>
-        <div class="viz-card-body">
-          <div class="viz-canvas-wrap">
-            <svg id="deepepTimeline" class="viz-canvas" aria-label="DeepEP kernel timeline" role="img"></svg>
-          </div>
-          <div class="viz-legend viz-legend-kernel" aria-label="Double buffering schedule legend">
-            <span class="viz-legend-item"><span class="viz-legend-swatch" style="background: var(--compute);"></span>compute phase</span>
-            <span class="viz-legend-item"><span class="viz-legend-swatch" style="background: var(--dbo);"></span>LL comm: direct RDMA</span>
-            <span class="viz-legend-item"><span class="viz-legend-swatch" style="background: var(--comm);"></span>HT comm: RDMA stage</span>
-            <span class="viz-legend-item"><span class="viz-legend-swatch viz-legend-swatch-kernel"></span>HT comm: gather/scatter</span>
-          </div>
-          <p class="viz-card-caption">LL shows direct RDMA per slot; HT shows hierarchical gather → RDMA → scatter. Double buffering keeps overlap safe without overwriting in‑flight buffers.</p>
-        </div>
-      </div>
-    </div>
-  </div>
+			<div class='viz-card'>
+				<div class='viz-card-header'>
+					<h4 class='viz-card-title'>Double Buffering Schedule</h4>
+				</div>
+				<div class='viz-card-body'>
+					<div class='viz-canvas-wrap'>
+						<svg id='deepepTimeline' class='viz-canvas' aria-label='DeepEP kernel timeline' role='img'></svg>
+					</div>
+					<div class='viz-legend viz-legend-kernel' aria-label='Double buffering schedule legend'>
+						<span class='viz-legend-item'
+							><span class='viz-legend-swatch' style='background: var(--compute);'></span>compute phase</span
+						>
+						<span class='viz-legend-item'
+							><span class='viz-legend-swatch' style='background: var(--dbo);'></span>LL comm: direct RDMA</span
+						>
+						<span class='viz-legend-item'
+							><span class='viz-legend-swatch' style='background: var(--comm);'></span>HT comm: RDMA stage</span
+						>
+						<span class='viz-legend-item'
+							><span class='viz-legend-swatch viz-legend-swatch-kernel'></span>HT comm: gather/scatter</span
+						>
+					</div>
+					<p class='viz-card-caption'>
+						LL shows direct RDMA per slot; HT shows hierarchical gather → RDMA → scatter. Double buffering keeps overlap
+						safe without overwriting in‑flight buffers.
+					</p>
+				</div>
+			</div>
+		</div>
+	</div>
 </figure>
 
 <style>
-  #deepep-mechanics .viz-widget-header {
-    border-bottom: none;
-    padding-bottom: 10px;
-    margin-bottom: 2px;
-  }
+	#deepep-mechanics .viz-widget-header {
+		border-bottom: none;
+		padding-bottom: 10px;
+		margin-bottom: 2px;
+	}
 
-  #deepep-mechanics .viz-widget-title {
-    letter-spacing: 0.12em;
-  }
+	#deepep-mechanics .viz-widget-title {
+		letter-spacing: 0.12em;
+	}
 
-  #deepep-mechanics #deepepTopoKpi {
-    margin-left: auto;
-    max-width: min(56ch, 58%);
-    text-align: right;
-    font-size: 0.72rem;
-    line-height: 1.35;
-    color: var(--muted);
-  }
+	#deepep-mechanics #deepepTopoKpi {
+		margin-left: auto;
+		max-width: min(56ch, 58%);
+		text-align: right;
+		font-size: 0.72rem;
+		line-height: 1.35;
+		color: var(--muted);
+	}
 
-  #deepep-mechanics .viz-widget-body {
-    padding-top: 12px;
-  }
+	#deepep-mechanics .viz-widget-body {
+		padding-top: 12px;
+	}
 
-  #deepep-mechanics .viz-toolbar {
-    margin-bottom: 14px;
-    padding: 10px 11px;
-    border: none;
-    border-radius: 10px;
-    background: rgba(255, 252, 246, 0.78);
-  }
+	#deepep-mechanics .viz-toolbar {
+		margin-bottom: 14px;
+		padding: 10px 11px;
+		border: none;
+		border-radius: 10px;
+		background: rgba(255, 252, 246, 0.78);
+	}
 
-  #deepep-mechanics .viz-controls-primary {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px 12px;
-    flex-wrap: wrap;
-  }
+	#deepep-mechanics .viz-controls-primary {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px 12px;
+		flex-wrap: wrap;
+	}
 
-  #deepep-mechanics .viz-group {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
+	#deepep-mechanics .viz-group {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
 
-  #deepep-mechanics .viz-segmented-control {
-    display: flex;
-    gap: 2px;
-    padding: 3px;
-    border-radius: 8px;
-    background: rgba(255, 248, 239, 0.85);
-  }
+	#deepep-mechanics .viz-segmented-control {
+		display: flex;
+		gap: 2px;
+		padding: 3px;
+		border-radius: 8px;
+		background: rgba(255, 248, 239, 0.85);
+	}
 
-  #deepep-mechanics .viz-segment {
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 5px 12px;
-    font-family: var(--font-body);
-    font-size: 0.74rem;
-    font-weight: 500;
-    color: var(--muted);
-    cursor: pointer;
-    border-radius: 6px;
-    transition: all 0.15s ease;
-    user-select: none;
-  }
+	#deepep-mechanics .viz-segment {
+		position: relative;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 5px 12px;
+		font-family: var(--font-body);
+		font-size: 0.74rem;
+		font-weight: 500;
+		color: var(--muted);
+		cursor: pointer;
+		border-radius: 6px;
+		transition: all 0.15s ease;
+		user-select: none;
+	}
 
-  #deepep-mechanics .viz-segment:hover {
-    color: var(--fg);
-    background: rgba(255, 252, 246, 0.75);
-  }
+	#deepep-mechanics .viz-segment:hover {
+		color: var(--fg);
+		background: rgba(255, 252, 246, 0.75);
+	}
 
-  #deepep-mechanics .viz-segment:has(input:checked) {
-    background: var(--surface);
-    color: var(--fg);
-    font-weight: 600;
-  }
+	#deepep-mechanics .viz-segment:has(input:checked) {
+		background: var(--surface);
+		color: var(--fg);
+		font-weight: 600;
+	}
 
-  #deepep-mechanics .viz-segment input {
-    position: absolute;
-    opacity: 0;
-    width: 0;
-    height: 0;
-  }
+	#deepep-mechanics .viz-segment input {
+		position: absolute;
+		opacity: 0;
+		width: 0;
+		height: 0;
+	}
 
-  #deepep-mechanics .viz-divider {
-    width: 0;
-    height: 20px;
-    margin: 0;
-  }
+	#deepep-mechanics .viz-divider {
+		width: 0;
+		height: 20px;
+		margin: 0;
+	}
 
-  #deepep-mechanics .viz-toggle-icon-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    height: 28px;
-    padding: 4px 12px;
-    border-radius: 999px;
-    border: none;
-    background: rgba(255, 252, 246, 0.9);
-    color: var(--muted);
-    font-size: 0.74rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
+	#deepep-mechanics .viz-toggle-icon-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		height: 28px;
+		padding: 4px 12px;
+		border-radius: 999px;
+		border: none;
+		background: rgba(255, 252, 246, 0.9);
+		color: var(--muted);
+		font-size: 0.74rem;
+		font-weight: 500;
+		cursor: pointer;
+		transition: all 0.15s ease;
+	}
 
-  #deepep-mechanics .viz-toggle-icon-btn:hover {
-    background: var(--surface);
-    color: var(--fg);
-  }
+	#deepep-mechanics .viz-toggle-icon-btn:hover {
+		background: var(--surface);
+		color: var(--fg);
+	}
 
-  #deepep-mechanics .viz-toggle-icon-btn input {
-    display: none;
-  }
+	#deepep-mechanics .viz-toggle-icon-btn input {
+		display: none;
+	}
 
-  #deepep-mechanics .viz-toggle-icon-btn .play-icon {
-    display: block;
-  }
+	#deepep-mechanics .viz-toggle-icon-btn .play-icon {
+		display: block;
+	}
 
-  #deepep-mechanics .viz-toggle-icon-btn .pause-icon {
-    display: none;
-  }
+	#deepep-mechanics .viz-toggle-icon-btn .pause-icon {
+		display: none;
+	}
 
-  #deepep-mechanics .viz-toggle-icon-btn:has(input:checked) {
-    background: var(--surface);
-    color: var(--accent);
-    font-weight: 600;
-  }
+	#deepep-mechanics .viz-toggle-icon-btn:has(input:checked) {
+		background: var(--surface);
+		color: var(--accent);
+		font-weight: 600;
+	}
 
-  #deepep-mechanics .viz-toggle-icon-btn:has(input:checked) .play-icon {
-    display: none;
-  }
+	#deepep-mechanics .viz-toggle-icon-btn:has(input:checked) .play-icon {
+		display: none;
+	}
 
-  #deepep-mechanics .viz-toggle-icon-btn:has(input:checked) .pause-icon {
-    display: block;
-  }
+	#deepep-mechanics .viz-toggle-icon-btn:has(input:checked) .pause-icon {
+		display: block;
+	}
 
-  #deepep-mechanics .viz-status-pill {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-    font-family: var(--font-mono);
-    font-size: 0.73rem;
-    color: var(--muted);
-    background: rgba(255, 252, 246, 0.95);
-    padding: 6px 10px;
-    border: none;
-    border-radius: 8px;
-    min-height: 34px;
-  }
+	#deepep-mechanics .viz-status-pill {
+		display: flex;
+		align-items: baseline;
+		gap: 6px;
+		font-family: var(--font-mono);
+		font-size: 0.73rem;
+		color: var(--muted);
+		background: rgba(255, 252, 246, 0.95);
+		padding: 6px 10px;
+		border: none;
+		border-radius: 8px;
+		min-height: 34px;
+	}
 
-  #deepep-mechanics .viz-status-label {
-    color: var(--muted-2);
-    font-size: 0.69rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-weight: 500;
-  }
+	#deepep-mechanics .viz-status-label {
+		color: var(--muted-2);
+		font-size: 0.69rem;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		font-weight: 500;
+	}
 
-  #deepep-mechanics .viz-status-value {
-    color: var(--fg);
-  }
+	#deepep-mechanics .viz-status-value {
+		color: var(--fg);
+	}
 
-  #deepep-mechanics .viz-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 14px;
-    align-items: stretch;
-  }
+	#deepep-mechanics .viz-grid {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 14px;
+		align-items: stretch;
+	}
 
-  #deepep-mechanics .viz-card {
-    border: none;
-    border-radius: 12px;
-    background: rgba(255, 252, 246, 0.72);
-    overflow: hidden;
-  }
+	#deepep-mechanics .viz-card {
+		border: none;
+		border-radius: 12px;
+		background: rgba(255, 252, 246, 0.72);
+		overflow: hidden;
+	}
 
-  #deepep-mechanics .viz-card-header {
-    padding: 10px 12px;
-    border-bottom: none;
-    background: linear-gradient(180deg, rgba(255, 248, 239, 0.82), rgba(255, 252, 246, 0.6));
-  }
+	#deepep-mechanics .viz-card-header {
+		padding: 10px 12px;
+		border-bottom: none;
+		background: linear-gradient(180deg, rgba(255, 248, 239, 0.82), rgba(255, 252, 246, 0.6));
+	}
 
-  #deepep-mechanics .viz-card-title {
-    color: var(--muted);
-    letter-spacing: 0.09em;
-    font-size: 0.66rem;
-  }
+	#deepep-mechanics .viz-card-title {
+		color: var(--muted);
+		letter-spacing: 0.09em;
+		font-size: 0.66rem;
+	}
 
-  #deepep-mechanics .viz-card-body {
-    padding: 11px 12px 12px;
-  }
+	#deepep-mechanics .viz-card-body {
+		padding: 11px 12px 12px;
+	}
 
-  #deepep-mechanics .viz-canvas-wrap {
-    margin-bottom: 9px;
-    border: none;
-    border-radius: 10px;
-    background: rgba(255, 248, 239, 0.5);
-    min-height: 240px;
-    height: 240px;
-    overflow: hidden;
-  }
+	#deepep-mechanics .viz-canvas-wrap {
+		margin-bottom: 9px;
+		border: none;
+		border-radius: 10px;
+		background: rgba(255, 248, 239, 0.5);
+		min-height: 240px;
+		height: 240px;
+		overflow: hidden;
+	}
 
-  #deepep-mechanics #deepepTopo.viz-canvas,
-  #deepep-mechanics #deepepTimeline.viz-canvas {
-    width: 100%;
-    height: 100%;
-    max-height: none;
-    aspect-ratio: auto;
-    background: transparent;
-    border-radius: 10px;
-  }
+	#deepep-mechanics #deepepTopo.viz-canvas,
+	#deepep-mechanics #deepepTimeline.viz-canvas {
+		width: 100%;
+		height: 100%;
+		max-height: none;
+		aspect-ratio: auto;
+		background: transparent;
+		border-radius: 10px;
+	}
 
-  #deepep-mechanics .viz-card-caption {
-    margin-top: 8px;
-    font-size: 0.79rem;
-    line-height: 1.58;
-    color: var(--muted);
-    max-width: none;
-  }
+	#deepep-mechanics .viz-card-caption {
+		margin-top: 8px;
+		font-size: 0.79rem;
+		line-height: 1.58;
+		color: var(--muted);
+		max-width: none;
+	}
 
-  #deepep-mechanics .viz-legend-kernel {
-    margin-top: 2px;
-    margin-bottom: 6px;
-    gap: 10px 12px;
-  }
+	#deepep-mechanics .viz-legend-kernel {
+		margin-top: 2px;
+		margin-bottom: 6px;
+		gap: 10px 12px;
+	}
 
-  #deepep-mechanics .viz-legend-kernel .viz-legend-item {
-    font-size: 0.72rem;
-    color: var(--muted);
-  }
+	#deepep-mechanics .viz-legend-kernel .viz-legend-item {
+		font-size: 0.72rem;
+		color: var(--muted);
+	}
 
-  #deepep-mechanics .viz-legend-swatch-kernel {
-    background: rgba(112, 122, 142, 0.85);
-  }
+	#deepep-mechanics .viz-legend-swatch-kernel {
+		background: rgba(112, 122, 142, 0.85);
+	}
 
-  @media (max-width: 1100px) {
-    #deepep-mechanics #deepepTopoKpi {
-      max-width: 100%;
-      width: 100%;
-      text-align: left;
-      margin-top: 3px;
-    }
+	@media (max-width: 1100px) {
+		#deepep-mechanics #deepepTopoKpi {
+			max-width: 100%;
+			width: 100%;
+			text-align: left;
+			margin-top: 3px;
+		}
 
-    #deepep-mechanics .viz-grid {
-      grid-template-columns: 1fr;
-    }
-  }
+		#deepep-mechanics .viz-grid {
+			grid-template-columns: 1fr;
+		}
+	}
 
-  @media (max-width: 760px) {
-    #deepep-mechanics .viz-toolbar {
-      padding: 9px 10px;
-    }
+	@media (max-width: 760px) {
+		#deepep-mechanics .viz-toolbar {
+			padding: 9px 10px;
+		}
 
-    #deepep-mechanics .viz-controls-primary {
-      gap: 8px;
-    }
+		#deepep-mechanics .viz-controls-primary {
+			gap: 8px;
+		}
 
-    #deepep-mechanics .viz-group {
-      width: 100%;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
+		#deepep-mechanics .viz-group {
+			width: 100%;
+			flex-wrap: wrap;
+			gap: 8px;
+		}
 
-    #deepep-mechanics .viz-segmented-control {
-      width: 100%;
-    }
+		#deepep-mechanics .viz-segmented-control {
+			width: 100%;
+		}
 
-    #deepep-mechanics .viz-segment {
-      flex: 1 1 auto;
-    }
+		#deepep-mechanics .viz-segment {
+			flex: 1 1 auto;
+		}
 
-    #deepep-mechanics .viz-status-pill {
-      width: 100%;
-      justify-content: center;
-    }
+		#deepep-mechanics .viz-status-pill {
+			width: 100%;
+			justify-content: center;
+		}
 
-    #deepep-mechanics .viz-canvas-wrap {
-      min-height: 242px;
-      height: 242px;
-    }
-  }
+		#deepep-mechanics .viz-canvas-wrap {
+			min-height: 242px;
+			height: 242px;
+		}
+	}
 </style>
+
+<script src='/impala_blog/scripts/moe-widget.js' is:inline></script>
